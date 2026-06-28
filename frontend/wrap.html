@@ -36,11 +36,17 @@
       <span>Landmarks <em>(optional — align features)</em></span>
       <small>Switch the view to a model, turn on <b>Place markers</b>, then click
         matching points on each (e.g. eye corners, mouth corners). Pairs match in
-        order: ref #1 ↔ yours #1.</small>
+        order: ref #1 ↔ yours #1. Drag a marker to move it; <b>Ctrl+Z</b> undoes.</small>
       <div class="row">
         <button id="markerMode" class="seg">Place markers: off</button>
         <button id="undoMarker" class="seg">Undo</button>
         <button id="clearMarkers" class="seg">Clear</button>
+      </div>
+      <div class="row">
+        <button id="autoMarkers" class="seg">Auto-detect</button>
+        <button id="saveMarkers" class="seg">Save</button>
+        <button id="loadMarkers" class="seg">Load</button>
+        <input type="file" id="loadMarkersFile" accept=".json" style="display:none" />
       </div>
       <div id="markerInfo" class="markerinfo">No landmarks placed.</div>
     </div>
@@ -53,8 +59,10 @@
         <option value="y">Mirror across Y — top / bottom</option>
         <option value="z">Mirror across Z — front / back</option>
       </select>
-      <small>Forces the deformation to be mirror-symmetric (a symmetric model
-        stays symmetric after wrapping).</small>
+      <small>Forces the deformation to be mirror-symmetric. You only need to
+        place markers on one side + the centre — the other side is mirrored
+        automatically (shown as faint ghost markers).</small>
+      <label class="check" style="margin-top:6px"><input type="checkbox" id="showPlane" checked /> Show symmetry plane</label>
     </label>
 
     <label class="field">

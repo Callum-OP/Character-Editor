@@ -180,44 +180,43 @@ export class ModelViewer {
       group.add(wire);
     }
     const markers = new THREE.Group();
-    group.add(markers);
+    const ghosts = new THREE.Group();
+    group.add(markers); group.add(ghosts);
     this.scene.add(group);
     this._frame(group);
     const box = new THREE.Box3().setFromBufferAttribute(geom.surface.getAttribute("position"));
     const localSize = box.getSize(new THREE.Vector3()).length() || 1;
-    this.models[key] = { group, surface, wire, markers, geom: geom.surface, localSize };
+    this.models[key] = { group, surface, wire, markers, ghosts, geom: geom.surface, localSize };
     if (!this.active) this.active = key;
     this._apply();
   }
 
-  // ---- landmark picking ------------------------------------------------------
-  enablePicking(callback) {
-    this.pickCallback = callback;
-    if (this._pickBound) return;
-    this._pickBound = (ev) => this._onClick(ev);
-    this.canvas.addEventListener("pointerdown", this._down = (e) => {
-      this._downXY = [e.clientX, e.clientY];
-    });
-    this.canvas.addEventListener("pointerup", this._pickBound);
+  // ---- landmark interaction (pick new / drag existing) -----------------------
+  setInteraction({ onPick, onMarkerDrag, onMarkerDragEnd } = {}) {
+    this.onPick = onPick; this.onMarkerDrag = onMarkerDrag; this.onMarkerDragEnd = onMarkerDragEnd;
+    if (this._bound) return;
+    this._bound = true;
+    this.canvas.addEventListener("pointerdown", (e) => this._onDown(e));
+    this.canvas.addEventListener("pointermove", (e) => this._onMove(e));
+    window.addEventListener("pointerup", (e) => this._onUp(e));
   }
 
-  _onClick(ev) {
-    if (!this.pickCallback || !this.active) return;
-    // ignore drags (orbit) — only treat near-stationary clicks as picks
-    if (this._downXY) {
-      const dx = ev.clientX - this._downXY[0], dy = ev.clientY - this._downXY[1];
-      if (dx * dx + dy * dy > 25) return;
-    }
-    const m = this.models[this.active];
-    if (!m) return;
+  setMarkersEnabled(on) { this.markersEnabled = on; }
+
+  _ndc(ev) {
     const r = this.canvas.getBoundingClientRect();
     this.pointer.x = ((ev.clientX - r.left) / r.width) * 2 - 1;
     this.pointer.y = -((ev.clientY - r.top) / r.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointer, this.camera);
+  }
+
+  _pickVertex(ev) {
+    const m = this.models[this.active];
+    if (!m) return null;
+    this._ndc(ev);
     const hits = this.raycaster.intersectObject(m.surface, false);
-    if (!hits.length) return;
+    if (!hits.length) return null;
     const hit = hits[0];
-    // nearest of the triangle's 3 vertices to the hit point -> vertex index
     const pos = m.geom.getAttribute("position");
     const lp = m.surface.worldToLocal(hit.point.clone());
     let best = -1, bestD = Infinity;
@@ -226,7 +225,63 @@ export class ModelViewer {
       const d = dx * dx + dy * dy + dz * dz;
       if (d < bestD) { bestD = d; best = vi; }
     }
-    if (best >= 0) this.pickCallback({ key: this.active, index: best });
+    return best >= 0 ? best : null;
+  }
+
+  _onDown(ev) {
+    this._downXY = [ev.clientX, ev.clientY];
+    this._drag = null;
+    if (!this.markersEnabled || !this.active) return;
+    const m = this.models[this.active];
+    if (!m) return;
+    this._ndc(ev);
+    const hits = this.raycaster.intersectObjects(m.markers.children, false);
+    if (hits.length) {
+      this._drag = { key: this.active, markerIndex: hits[0].object.userData.markerIndex, moved: false };
+      this.controls.enabled = false; // don't orbit while dragging a marker
+    }
+  }
+
+  _onMove(ev) {
+    if (!this._drag) return;
+    const vi = this._pickVertex(ev);
+    if (vi != null && this.onMarkerDrag) {
+      this._drag.moved = true;
+      this.onMarkerDrag(this._drag.key, this._drag.markerIndex, vi);
+    }
+  }
+
+  _onUp(ev) {
+    if (this._drag) {
+      this.controls.enabled = true;
+      if (this._drag.moved && this.onMarkerDragEnd) this.onMarkerDragEnd();
+      this._drag = null;
+      return;
+    }
+    if (!this.markersEnabled || !this.active || !this.onPick) return;
+    const dx = ev.clientX - this._downXY[0], dy = ev.clientY - this._downXY[1];
+    if (dx * dx + dy * dy > 25) return;   // was an orbit drag
+    const vi = this._pickVertex(ev);
+    if (vi != null) this.onPick({ key: this.active, index: vi });
+  }
+
+  // mirror a vertex across the model's centre on `axis` (0/1/2) -> nearest vertex index
+  mirrorVertexIndex(key, index, axis) {
+    const m = this.models[key];
+    if (!m) return index;
+    const pos = m.geom.getAttribute("position");
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < pos.count; i++) { const c = pos.getComponent(i, axis); if (c < lo) lo = c; if (c > hi) hi = c; }
+    const center = (lo + hi) * 0.5;
+    const tx = [pos.getX(index), pos.getY(index), pos.getZ(index)];
+    tx[axis] = 2 * center - tx[axis];
+    let best = index, bestD = Infinity;
+    for (let i = 0; i < pos.count; i++) {
+      const dx = pos.getX(i) - tx[0], dy = pos.getY(i) - tx[1], dz = pos.getZ(i) - tx[2];
+      const d = dx * dx + dy * dy + dz * dz;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
   }
 
   _labelSprite(text, color) {
@@ -240,7 +295,7 @@ export class ModelViewer {
     return spr;
   }
 
-  // render markers for a model from a list of vertex indices
+  // render numbered, draggable markers from a list of vertex indices
   setMarkers(key, indices, color = 0xffffff) {
     const m = this.models[key];
     if (!m) return;
@@ -253,12 +308,31 @@ export class ModelViewer {
         new THREE.SphereGeometry(r, 16, 12),
         new THREE.MeshBasicMaterial({ color, depthTest: false }));
       sph.renderOrder = 999;
+      sph.userData.markerIndex = n;   // for drag hit-testing
       sph.position.set(pos.getX(vi), pos.getY(vi), pos.getZ(vi));
       const label = this._labelSprite(String(n + 1), color);
       label.scale.setScalar(r * 3.2);
       label.position.set(0, r * 2.2, 0);
       sph.add(label);
       m.markers.add(sph);
+    });
+  }
+
+  // faint, non-interactive "ghost" markers (e.g. auto-mirrored symmetry points)
+  setGhostMarkers(key, indices, color = 0xffffff) {
+    const m = this.models[key];
+    if (!m) return;
+    m.ghosts.clear();
+    const pos = m.geom.getAttribute("position");
+    const r = m.localSize * 0.01;
+    indices.forEach((vi) => {
+      if (vi == null || vi < 0 || vi >= pos.count) return;
+      const sph = new THREE.Mesh(
+        new THREE.SphereGeometry(r, 12, 8),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, depthTest: false }));
+      sph.renderOrder = 998;
+      sph.position.set(pos.getX(vi), pos.getY(vi), pos.getZ(vi));
+      m.ghosts.add(sph);
     });
   }
 

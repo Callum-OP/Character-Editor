@@ -234,6 +234,67 @@ def reference_bvh(ref):
     return bvh
 
 
+def feature_suggestions(obj):
+    """Geometric salient points: the most extreme vertex in +/-X, +/-Y, +/-Z and
+    the most protruding point relative to the centroid. Orientation-consistent
+    between two similarly-posed models, so they pair up — a starting set the user
+    refines (not ML eye/mouth detection)."""
+    vs = obj.data.vertices
+    if not vs:
+        return []
+    idx = []
+    for axis in range(3):
+        idx.append(min(range(len(vs)), key=lambda i: vs[i].co[axis]))
+        idx.append(max(range(len(vs)), key=lambda i: vs[i].co[axis]))
+    c = mathutils.Vector((0, 0, 0))
+    for v in vs:
+        c += v.co
+    c /= len(vs)
+    idx.append(max(range(len(vs)), key=lambda i: (vs[i].co - c).length))
+    # de-dup while preserving order
+    seen, out = set(), []
+    for i in idx:
+        if i not in seen:
+            seen.add(i); out.append(i)
+    return out
+
+
+def nearest_index(positions, kd, query):
+    _co, j, _d = kd.find(query)
+    return j
+
+
+def mirror_landmarks(ref, basis, ref_idx, src_idx, axis):
+    """Expand landmark pairs with their mirror across `axis` so a one-sided set
+    becomes symmetric. Centre-line points (mirror == self) are left single."""
+    ref_co = [v.co for v in ref.data.vertices]
+    rkd = KDTree(len(ref_co))
+    for i, p in enumerate(ref_co):
+        rkd.insert(p, i)
+    rkd.balance()
+    skd = KDTree(len(basis))
+    for i, p in enumerate(basis):
+        skd.insert(p, i)
+    skd.balance()
+    rx = [p[axis] for p in ref_co]
+    sx = [p[axis] for p in basis]
+    rc = (min(rx) + max(rx)) * 0.5
+    sc = (min(sx) + max(sx)) * 0.5
+    out_r, out_s = list(ref_idx), list(src_idx)
+    seen = set(zip(ref_idx, src_idx))
+    for ri, si in zip(ref_idx, src_idx):
+        rp = ref_co[ri].copy(); rp[axis] = 2 * rc - rp[axis]
+        sp = basis[si].copy();  sp[axis] = 2 * sc - sp[axis]
+        rj = nearest_index(ref_co, rkd, rp)
+        sj = nearest_index(basis, skd, sp)
+        if rj == ri and sj == si:
+            continue  # centre-line point
+        if (rj, sj) in seen:
+            continue
+        seen.add((rj, sj)); out_r.append(rj); out_s.append(sj)
+    return out_r, out_s
+
+
 def basis_positions(src):
     sk = src.data.shape_keys
     if sk and sk.key_blocks:
@@ -273,6 +334,7 @@ def prepare(cfg):
     ref = join_objects(import_collect(cfg["reference"]))
     apply_transforms(ref)
     ref_n = len(ref.data.vertices)
+    ref_auto = feature_suggestions(ref)
     make_active(ref)
     os.makedirs(os.path.dirname(os.path.abspath(cfg["ref_out"])), exist_ok=True)
     br.export_model(cfg["ref_out"])
@@ -282,11 +344,15 @@ def prepare(cfg):
     apply_transforms(src)
     src_n = len(src.data.vertices)
     src_keys = (len(src.data.shape_keys.key_blocks) - 1) if src.data.shape_keys else 0
+    src_auto = feature_suggestions(src)
     make_active(src)
     br.export_model(cfg["src_out"])
+    # pair the two suggestion sets to equal length (same extreme order)
+    m = min(len(ref_auto), len(src_auto))
     print("RETOPO_RESULT:" + json.dumps({
         "ok": True, "reference_vertices": ref_n, "source_vertices": src_n,
         "source_shape_keys": src_keys,
+        "auto_landmarks": {"ref": ref_auto[:m], "src": src_auto[:m]},
     }))
 
 
@@ -333,9 +399,14 @@ def main():
             lm = json.load(f)
         ref_idx, src_idx = lm.get("ref", []), lm.get("src", [])
         pairs = min(len(ref_idx), len(src_idx))
-        ref_co = [ref.data.vertices[k].co.copy() for k in ref_idx[:pairs]
+        ref_idx, src_idx = ref_idx[:pairs], src_idx[:pairs]
+        # with symmetry on, mirror each landmark so a one-sided set is symmetric
+        if cfg["sym_axis"] in AXIS_INDEX and pairs:
+            ref_idx, src_idx = mirror_landmarks(ref, basis, ref_idx, src_idx,
+                                                AXIS_INDEX[cfg["sym_axis"]])
+        ref_co = [ref.data.vertices[k].co.copy() for k in ref_idx
                   if 0 <= k < ref_vert_count]
-        src_co = [basis[k] for k in src_idx[:pairs] if 0 <= k < len(basis)]
+        src_co = [basis[k] for k in src_idx if 0 <= k < len(basis)]
         n_landmarks = min(len(ref_co), len(src_co))
         if n_landmarks >= 1:
             S = np.array([[c.x, c.y, c.z] for c in src_co[:n_landmarks]])

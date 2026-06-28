@@ -152,6 +152,7 @@ async def wrap_prepare(reference: UploadFile = File(...), source: UploadFile = F
         "reference_vertices": data.get("reference_vertices"),
         "source_vertices": data.get("source_vertices"),
         "source_shape_keys": data.get("source_shape_keys"),
+        "auto_landmarks": data.get("auto_landmarks", {"ref": [], "src": []}),
     })
 
 

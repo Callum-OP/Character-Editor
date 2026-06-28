@@ -191,13 +191,23 @@ few matching points to fix that:
 1. Load both models — the app sends them to the backend, which returns
    index-preserving OBJ previews (so a picked point maps to an exact vertex).
 2. Switch the **View** to a model, turn on **Place markers**, and click matching
-   points on each model. Pairs match in order (ref #1 ↔ yours #1). Use Undo/Clear
-   as needed.
+   points on each model. Pairs match in order (ref #1 ↔ yours #1).
 3. Run the wrap. The landmarks drive a warp *before* surface projection:
    - **4+ pairs** → a **thin-plate spline** (smooth affine + local bending) that
      places and scales features (move the eye to the reference eye, resize the
      mouth to match, etc.),
    - **1–3 pairs** → a global similarity fit (translate + rotate + uniform scale).
+
+Marker conveniences:
+- **Auto-detect** — suggests a set of geometric feature points (salient
+  extremes) on both models as a starting set; refine them by dragging.
+- **Drag** any marker to move it; it snaps to the nearest vertex live.
+- **Ctrl+Z** undoes the last marker change (add / move / clear / load).
+- **Save / Load** export and re-import landmarks as JSON; markers are also
+  auto-saved in the browser per model pair, so reloading restores them.
+- **Symmetry**: when on, the symmetry **plane** is shown and you only place
+  markers on **one side + the centre line** — each is auto-mirrored to the other
+  side (faint *ghost* markers show where), and the backend uses the mirrored set.
 
 Landmarks are stored as **vertex indices**, not coordinates, so there's no
 coordinate round-tripping between the browser and Blender's axis conventions.
