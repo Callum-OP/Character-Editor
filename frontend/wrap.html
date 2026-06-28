@@ -18,33 +18,55 @@
   <aside id="panel">
     <a class="hubnav" href="/">&larr; Mesh Hub</a>
     <h1>Shape Match<br/><span class="thin">(Wrap)</span></h1>
-    <p class="sub">Deform your model's vertices to match a reference shape,
-      keeping your topology, features &amp; shape keys.</p>
+    <p class="sub">Reshape your model's vertices to match a reference, keeping
+      your topology, features &amp; shape keys.</p>
 
     <div id="engine" class="engine">Detecting engine&hellip;</div>
 
     <label class="field">
       <span>Reference model <em>(target shape)</em></span>
       <input type="file" id="refFile" accept=".obj,.glb,.gltf,.fbx,.ply,.stl" />
-      <small>The shape you want to match.</small>
     </label>
-
     <label class="field">
       <span>Your model <em>(to be reshaped)</em></span>
       <input type="file" id="srcFile" accept=".obj,.glb,.gltf,.fbx,.ply,.stl" />
-      <small>Keeps its topology &amp; features; vertices move toward the reference.</small>
+    </label>
+
+    <div id="landmarks" class="field landmarks hidden">
+      <span>Landmarks <em>(optional — align features)</em></span>
+      <small>Switch the view to a model, turn on <b>Place markers</b>, then click
+        matching points on each (e.g. eye corners, mouth corners). Pairs match in
+        order: ref #1 ↔ yours #1.</small>
+      <div class="row">
+        <button id="markerMode" class="seg">Place markers: off</button>
+        <button id="undoMarker" class="seg">Undo</button>
+        <button id="clearMarkers" class="seg">Clear</button>
+      </div>
+      <div id="markerInfo" class="markerinfo">No landmarks placed.</div>
+    </div>
+
+    <label class="field">
+      <span>Symmetry</span>
+      <select id="symAxis">
+        <option value="none" selected>None</option>
+        <option value="x">Mirror across X — left / right</option>
+        <option value="y">Mirror across Y — top / bottom</option>
+        <option value="z">Mirror across Z — front / back</option>
+      </select>
+      <small>Forces the deformation to be mirror-symmetric (a symmetric model
+        stays symmetric after wrapping).</small>
     </label>
 
     <label class="field">
       <span>Wrap strength: <b id="strengthVal">100</b>%</span>
       <input type="range" id="strength" min="0" max="100" step="5" value="100" />
-      <small>How far vertices move onto the reference surface (100% = fully conform).</small>
+      <small>How far vertices snap onto the reference surface (0% = landmark
+        morph only, no surface snapping).</small>
     </label>
 
     <label class="field">
       <span>Smoothing passes: <b id="smoothVal">3</b></span>
       <input type="range" id="smooth" min="0" max="15" step="1" value="3" />
-      <small>Relaxes the result to remove projection noise.</small>
     </label>
 
     <label class="field">
@@ -53,8 +75,6 @@
         <option value="preserve" selected>Preserve shape keys</option>
         <option value="base">Conform base only (drop keys)</option>
       </select>
-      <small>Preserve keeps all blend shapes working on the reshaped mesh
-        (needs FBX/glTF output).</small>
     </label>
 
     <label class="field">
@@ -63,7 +83,6 @@
         <option value="bbox" selected>Auto: match size &amp; center</option>
         <option value="none">None (already aligned)</option>
       </select>
-      <small>Optimised for heads/faces. Models should face the same way.</small>
     </label>
 
     <label class="field">
@@ -72,7 +91,7 @@
         <option value="glb" selected>GLB (keeps shape keys)</option>
         <option value="gltf">glTF (keeps shape keys)</option>
         <option value="fbx">FBX (keeps shape keys)</option>
-        <option value="obj">OBJ (base only, no keys)</option>
+        <option value="obj">OBJ (base only)</option>
         <option value="ply">PLY</option>
         <option value="stl">STL</option>
       </select>

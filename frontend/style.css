@@ -55,6 +55,14 @@ body.hub {
 h1 .thin { font-weight: 300; color: var(--muted); }
 .field em { color: var(--accent); font-style: normal; font-weight: 600; font-size: 11px; }
 
+.landmarks {
+  background: var(--panel2); border: 1px solid var(--line);
+  border-radius: 8px; padding: 10px 12px;
+}
+.landmarks .row { gap: 6px; }
+.landmarks .seg { flex: 1; text-align: center; }
+.markerinfo { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
 #panel {
   width: 320px;
   min-width: 320px;

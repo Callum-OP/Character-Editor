@@ -171,43 +171,64 @@ head shape you want it to match. Wrap yours to the target and keep rigging it.
 
 - **Reference model** — the target shape to match.
 - **Your model** — the mesh to reshape (may carry shape keys).
-- **Wrap strength** (0–100%) — how far vertices move onto the reference surface.
-  100% fully conforms; lower values blend toward the original.
-- **Smoothing passes** — Laplacian relaxation of the displacement field to
-  remove projection noise.
-- **Shape keys** — *Preserve* (keep every blend shape working on the reshaped
-  mesh; needs FBX/glTF output) or *Conform base only* (drop keys).
-- **Alignment** — *Auto* matches bounding-box size & center (tuned for
-  heads/faces); *None* assumes the models are already aligned. Both models
-  should face the same way.
+- **Landmarks** *(optional)* — place matching points on each model (eye corners,
+  nose tip, mouth corners…) to align features precisely. See below.
+- **Symmetry** (None / X / Y / Z) — forces the wrapped result to be mirror-
+  symmetric, like the topology tool's symmetry option.
+- **Wrap strength** (0–100%) — how far vertices snap onto the reference surface.
+  100% fully conforms; 0% applies the landmark morph only (no surface snapping).
+- **Smoothing passes** — Laplacian relaxation of the displacement field.
+- **Shape keys** — *Preserve* (keep every blend shape working; needs FBX/glTF
+  output) or *Conform base only* (drop keys).
+- **Alignment** — *Auto* matches bounding-box size & center; *None* assumes the
+  models are pre-aligned. Both models should face the same way.
+
+## Landmark-guided matching
+
+Nearest-surface projection alone has no idea an eye should map to an eye. Place a
+few matching points to fix that:
+
+1. Load both models — the app sends them to the backend, which returns
+   index-preserving OBJ previews (so a picked point maps to an exact vertex).
+2. Switch the **View** to a model, turn on **Place markers**, and click matching
+   points on each model. Pairs match in order (ref #1 ↔ yours #1). Use Undo/Clear
+   as needed.
+3. Run the wrap. The landmarks drive a warp *before* surface projection:
+   - **4+ pairs** → a **thin-plate spline** (smooth affine + local bending) that
+     places and scales features (move the eye to the reference eye, resize the
+     mouth to match, etc.),
+   - **1–3 pairs** → a global similarity fit (translate + rotate + uniform scale).
+
+Landmarks are stored as **vertex indices**, not coordinates, so there's no
+coordinate round-tripping between the browser and Blender's axis conventions.
 
 ## How it works internally
 
-`backend/blender_wrap.py`:
+`backend/blender_wrap.py` (two phases — `prepare` then wrap):
 1. import reference + source, apply transforms, optionally bbox-align the source,
-2. build a **BVH tree** over the (triangulated) reference surface,
-3. for each source vertex, find the nearest point on the reference surface and
-   compute a displacement `delta = lerp(vertex, nearest, strength)`,
+2. if landmarks: warp the source by TPS / similarity so landmarks hit their
+   targets,
+3. build a **BVH tree** over the reference surface and project each (warped)
+   vertex toward the nearest reference point by `strength`,
 4. **Laplacian-smooth the displacement field** (not the mesh) to avoid shrinkage,
-5. apply: *preserve* shifts the base **and every shape key** by the same per-
-   vertex delta (so each key's relative offset is unchanged); *base only* moves
-   the base and clears keys.
+5. if symmetry: average mirror-paired final positions so the result is symmetric,
+6. apply: *preserve* shifts the base **and every shape key** by the same per-
+   vertex delta (relative offsets unchanged); *base only* moves the base and
+   clears keys.
 
-All geometry math is done in **bmesh / mathutils** (no Shrinkwrap/edit-mode
-operators), which is the robust path in headless Blender 5.0.1.
+All geometry math is **bmesh / mathutils / numpy** (Blender bundles numpy) — no
+Shrinkwrap/edit-mode operators, which are the robust path in headless Blender.
 
-Output stats report mean/max vertex offset and how many shape keys were kept.
-Verified: wrapping a model to **itself** yields exactly 0 offset; wrapping to a
-similar shape gives small offsets; to a very different shape, large offsets —
-and the output always has the **same vertex count as your model** (topology
-preserved).
+Verified: self-wrap = 0 offset; similar→small, dissimilar→large offsets; output
+always has the **same vertex count as your model** (topology preserved); the
+symmetry option raises mirror-symmetry substantially (≈100% on a symmetric base).
 
 ### Limitations / roadmap
 
-- **Automatic correspondence only (v1).** Nearest-surface projection has no
-  semantic awareness, so where two models differ a lot near a feature (an eye,
-  the inside of a mouth), vertices can project to the wrong place. **Landmark-
-  guided wrapping** (place matching points on both models) is the planned next
-  upgrade for accurate feature alignment.
+- Landmark correspondence is manual and as good as the points you place; with no
+  landmarks it falls back to pure nearest-surface (which can mismatch features
+  where the two shapes differ a lot).
+- Symmetry quality depends on the base mesh having a clean mirror correspondence
+  (a strongly asymmetric base won't reach a perfect mirror).
 - Models should share a rough orientation; auto-align only matches size/center.
 - "Preserve shape keys" requires an output format that stores them (GLB/glTF/FBX).

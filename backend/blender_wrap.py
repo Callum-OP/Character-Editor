@@ -20,6 +20,14 @@ Args after `--`:
     --smooth-iters <int>      Laplacian passes over the displacement field
     --shape-keys <preserve|base>
     --align <bbox|none>       auto match size+center, or assume pre-aligned
+    --landmarks <path>        optional JSON {"ref":[idx...], "src":[idx...]} of
+                              matching vertex indices used to guide the warp
+                              (thin-plate-spline / similarity fit before
+                              projection) so features line up
+    --sym-axis <none|x|y|z>   symmetrize the displacement across this axis
+
+Landmarks are VERTEX INDICES into the imported meshes (the same indexing the
+prepare step exposes to the UI), so no fragile coordinate round-tripping.
 
 Emits one JSON line prefixed RETOPO_RESULT: with stats.
 """
@@ -30,7 +38,9 @@ import json
 import bpy
 import bmesh
 import mathutils
+import numpy as np
 from mathutils.bvhtree import BVHTree
+from mathutils.kdtree import KDTree
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blender_remesh as br  # reuse import/export/scene helpers
@@ -42,11 +52,16 @@ def argv_after_dashes():
 
 def parse_args(args):
     out = {"reference": None, "source": None, "output": None, "view_output": None,
-           "strength": 1.0, "smooth_iters": 3, "shape_keys": "preserve", "align": "bbox"}
+           "strength": 1.0, "smooth_iters": 3, "shape_keys": "preserve", "align": "bbox",
+           "landmarks": None, "sym_axis": "none",
+           "prepare": False, "ref_out": None, "src_out": None}
     i = 0
     while i < len(args):
         a = args[i]
-        if a == "--reference": out["reference"] = args[i + 1]; i += 2
+        if a == "--prepare": out["prepare"] = True; i += 1
+        elif a == "--ref-out": out["ref_out"] = args[i + 1]; i += 2
+        elif a == "--src-out": out["src_out"] = args[i + 1]; i += 2
+        elif a == "--reference": out["reference"] = args[i + 1]; i += 2
         elif a == "--source": out["source"] = args[i + 1]; i += 2
         elif a == "--output": out["output"] = args[i + 1]; i += 2
         elif a == "--view-output": out["view_output"] = args[i + 1]; i += 2
@@ -54,7 +69,82 @@ def parse_args(args):
         elif a == "--smooth-iters": out["smooth_iters"] = int(args[i + 1]); i += 2
         elif a == "--shape-keys": out["shape_keys"] = args[i + 1].lower(); i += 2
         elif a == "--align": out["align"] = args[i + 1].lower(); i += 2
+        elif a == "--landmarks": out["landmarks"] = args[i + 1]; i += 2
+        elif a == "--sym-axis": out["sym_axis"] = args[i + 1].lower(); i += 2
         else: i += 1
+    return out
+
+
+AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
+
+
+def umeyama(src, dst):
+    """Best-fit similarity (rotation+uniform scale+translation) mapping src->dst.
+    src, dst: (n,3) numpy arrays. Returns a warp(points)->points function."""
+    src_mean, dst_mean = src.mean(0), dst.mean(0)
+    sc, dc = src - src_mean, dst - dst_mean
+    cov = (dc.T @ sc) / len(src)
+    U, S, Vt = np.linalg.svd(cov)
+    d = np.sign(np.linalg.det(U @ Vt))
+    R = U @ np.diag([1.0, 1.0, d]) @ Vt
+    var = (sc ** 2).sum() / len(src)
+    scale = float((S * [1.0, 1.0, d]).sum() / var) if var > 1e-12 else 1.0
+    t = dst_mean - scale * (R @ src_mean)
+    return lambda pts: (scale * (R @ pts.T).T) + t
+
+
+def tps_warp(src, dst):
+    """Thin-plate-spline warp exactly mapping src landmarks -> dst landmarks
+    (affine + smooth local bending). Returns a warp(points)->points function."""
+    n = len(src)
+    K = np.sqrt(((src[:, None, :] - src[None, :, :]) ** 2).sum(-1))  # |pi-pj|
+    P = np.hstack([np.ones((n, 1)), src])
+    L = np.zeros((n + 4, n + 4))
+    L[:n, :n] = K + np.eye(n) * 1e-6   # light regularization
+    L[:n, n:] = P
+    L[n:, :n] = P.T
+    Y = np.vstack([dst, np.zeros((4, 3))])
+    W = np.linalg.solve(L, Y)
+    w, a = W[:n], W[n:]
+
+    def warp(pts):
+        dd = np.sqrt(((pts[:, None, :] - src[None, :, :]) ** 2).sum(-1))
+        return dd @ w + np.hstack([np.ones((len(pts), 1)), pts]) @ a
+    return warp
+
+
+def symmetrize_positions(target, basis, axis):
+    """Force the wrapped result to be mirror-symmetric across `axis`.
+
+    Vertex correspondence (which vertex mirrors which) is found from the *base*
+    mesh; the paired target positions are then averaged with each other's
+    mirror, so the output is exactly symmetric even if the base wasn't.
+    Returns symmetrized target positions."""
+    n = len(basis)
+    bx = [b[axis] for b in basis]
+    bcenter = (min(bx) + max(bx)) * 0.5
+    kd = KDTree(n)
+    for i, b in enumerate(basis):
+        kd.insert(b, i)
+    kd.balance()
+    partner = [0] * n
+    for i, b in enumerate(basis):
+        mb = b.copy()
+        mb[axis] = 2.0 * bcenter - mb[axis]
+        _co, j, _d = kd.find(mb)
+        partner[i] = j
+    tx = [t[axis] for t in target]
+    tcenter = (min(tx) + max(tx)) * 0.5
+    out = [t.copy() for t in target]
+    for i in range(n):
+        j = partner[i]
+        mtj = target[j].copy()
+        mtj[axis] = 2.0 * tcenter - mtj[axis]   # mirror partner across centre
+        avg = (target[i] + mtj) * 0.5
+        out[i] = avg
+        mavg = avg.copy()
+        mavg[axis] = 2.0 * tcenter - mavg[axis]
+        out[j] = mavg
     return out
 
 
@@ -89,9 +179,28 @@ def make_active(obj):
     bpy.context.view_layer.objects.active = obj
 
 
+def bake_matrix(obj, M):
+    """Bake a 4x4 transform into the mesh data and reset the object transform.
+
+    Unlike bpy.ops.object.transform_apply, this also transforms EVERY shape key
+    (and works headless) — the operator drops/refuses shape keys, which is why
+    blend shapes were vanishing. We transform the base mesh vertices AND all
+    shape keys, keeping mesh.vertices == Basis: the exporter writes
+    mesh.vertices as the base, so it must stay in sync or the output is
+    identical to the input."""
+    for v in obj.data.vertices:
+        v.co = M @ v.co
+    sk = obj.data.shape_keys
+    if sk and sk.key_blocks:
+        for kb in sk.key_blocks:
+            for d in kb.data:
+                d.co = M @ d.co
+    obj.matrix_basis = mathutils.Matrix.Identity(4)
+    obj.data.update()
+
+
 def apply_transforms(obj):
-    make_active(obj)
-    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    bake_matrix(obj, obj.matrix_world.copy())
 
 
 def bbox(obj):
@@ -113,9 +222,7 @@ def align_source(src, ref):
     M = (mathutils.Matrix.Translation(r_center)
          @ mathutils.Matrix.Diagonal((s, s, s, 1.0))
          @ mathutils.Matrix.Translation(-s_center))
-    make_active(src)
-    src.matrix_world = M @ src.matrix_world
-    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    bake_matrix(src, M)  # transforms basis + all shape keys (keeps blend shapes)
 
 
 def reference_bvh(ref):
@@ -158,8 +265,40 @@ def smooth_field(delta, adj, iterations, factor=0.5):
     return delta
 
 
+def prepare(cfg):
+    """Import both models and re-export each as an OBJ that preserves vertex
+    order, so the UI can place landmarks as vertex indices that map exactly to
+    the meshes the wrap step will use."""
+    br.clear_scene()
+    ref = join_objects(import_collect(cfg["reference"]))
+    apply_transforms(ref)
+    ref_n = len(ref.data.vertices)
+    make_active(ref)
+    os.makedirs(os.path.dirname(os.path.abspath(cfg["ref_out"])), exist_ok=True)
+    br.export_model(cfg["ref_out"])
+    bpy.data.objects.remove(ref, do_unlink=True)
+
+    src = join_objects(import_collect(cfg["source"]), prefer_shape_keys=True)
+    apply_transforms(src)
+    src_n = len(src.data.vertices)
+    src_keys = (len(src.data.shape_keys.key_blocks) - 1) if src.data.shape_keys else 0
+    make_active(src)
+    br.export_model(cfg["src_out"])
+    print("RETOPO_RESULT:" + json.dumps({
+        "ok": True, "reference_vertices": ref_n, "source_vertices": src_n,
+        "source_shape_keys": src_keys,
+    }))
+
+
 def main():
     cfg = parse_args(argv_after_dashes())
+    if cfg["prepare"]:
+        if not (cfg["reference"] and cfg["source"] and cfg["ref_out"] and cfg["src_out"]):
+            print("RETOPO_RESULT:" + json.dumps({"ok": False, "error": "prepare needs reference/source/ref-out/src-out"}))
+            sys.exit(1)
+        prepare(cfg)
+        return
+
     for k in ("reference", "source", "output"):
         if not cfg[k]:
             print("RETOPO_RESULT:" + json.dumps({"ok": False, "error": "missing " + k}))
@@ -181,31 +320,103 @@ def main():
 
     bvh = reference_bvh(ref)
     ref_vert_count = len(ref.data.vertices)
-    # The BVH is an independent copy, so the reference object is no longer
-    # needed. Remove it now so every export below contains only the result.
+    _rl, _rh = bbox(ref)
+    ref_size = max((_rh - _rl)[i] for i in range(3)) or 1.0
+    basis = basis_positions(src)
+    strength = max(0.0, min(1.0, cfg["strength"]))
+
+    # ---- optional landmark-guided pre-warp ---------------------------------
+    n_landmarks = 0
+    warp = None
+    if cfg["landmarks"]:
+        with open(cfg["landmarks"]) as f:
+            lm = json.load(f)
+        ref_idx, src_idx = lm.get("ref", []), lm.get("src", [])
+        pairs = min(len(ref_idx), len(src_idx))
+        ref_co = [ref.data.vertices[k].co.copy() for k in ref_idx[:pairs]
+                  if 0 <= k < ref_vert_count]
+        src_co = [basis[k] for k in src_idx[:pairs] if 0 <= k < len(basis)]
+        n_landmarks = min(len(ref_co), len(src_co))
+        if n_landmarks >= 1:
+            S = np.array([[c.x, c.y, c.z] for c in src_co[:n_landmarks]])
+            D = np.array([[c.x, c.y, c.z] for c in ref_co[:n_landmarks]])
+            warp = tps_warp(S, D) if n_landmarks >= 4 else umeyama(S, D)
+            if n_landmarks < 4:
+                notes.append("only %d landmark pairs — used a global "
+                             "similarity fit (4+ enables local shaping)" % n_landmarks)
+
+    # warped base positions (landmark morph), then nearest-surface projection
+    if warp is not None:
+        warped_np = warp(np.array([[p.x, p.y, p.z] for p in basis]))
+        warped = [mathutils.Vector((float(r[0]), float(r[1]), float(r[2]))) for r in warped_np]
+    else:
+        warped = basis
+
+    # The BVH is an independent copy; drop the reference object so exports below
+    # contain only the result.
     try:
         bpy.data.objects.remove(ref, do_unlink=True)
     except Exception:
         pass
     ref = None
-    basis = basis_positions(src)
-    strength = max(0.0, min(1.0, cfg["strength"]))
 
-    # per-vertex displacement onto the nearest reference surface point
-    delta = [mathutils.Vector((0.0, 0.0, 0.0))] * len(basis)
-    delta = list(delta)
+    # Iterative project-and-relax: snap onto the reference, then alternately
+    # relax (even out vertex spacing) and re-project. Keeping the result ON the
+    # surface every pass is what makes the fit accurate — the old approach
+    # smoothed the displacement off the surface, which loosened the match.
+    adj = build_adjacency(src)
+
+    def project(positions):
+        out, miss = [], 0
+        for p in positions:
+            loc, _n, _idx, _d = bvh.find_nearest(p)
+            if loc is None:
+                miss += 1; out.append(p)
+            else:
+                out.append(loc)
+        return out, miss
+
+    def relax(positions, factor=0.5):
+        new = positions[:]
+        for i, nb in enumerate(adj):
+            if not nb:
+                continue
+            avg = mathutils.Vector((0.0, 0.0, 0.0))
+            for j in nb:
+                avg += positions[j]
+            avg /= len(nb)
+            new[i] = positions[i].lerp(avg, factor)
+        return new
+
     misses = 0
-    for i, p in enumerate(basis):
-        loc, _normal, _idx, dist = bvh.find_nearest(p)
-        if loc is None:
-            misses += 1
-            continue
-        target = p.lerp(loc, strength)
-        delta[i] = target - p
+    if strength > 0.0:
+        positions, misses = project(warped)
+        for _ in range(cfg["smooth_iters"]):
+            positions = relax(positions, 0.5)
+            positions, _m = project(positions)   # re-snap so relax stays on-surface
+        final = [basis[i].lerp(positions[i], strength) for i in range(len(basis))]
+    else:
+        # strength 0 -> landmark morph only (no surface snapping)
+        positions = warped[:]
+        for _ in range(cfg["smooth_iters"]):
+            positions = relax(positions, 0.5)
+        final = positions
     if misses:
         notes.append("%d vertices had no nearby reference surface" % misses)
 
-    delta = smooth_field(delta, build_adjacency(src), cfg["smooth_iters"])
+    if cfg["sym_axis"] in AXIS_INDEX:
+        final = symmetrize_positions(final, basis, AXIS_INDEX[cfg["sym_axis"]])
+
+    # accuracy readout: how far the final surface sits from the reference
+    res_d = []
+    for fp in final:
+        loc, _n, _i, d = bvh.find_nearest(fp)
+        if loc is not None:
+            res_d.append(d)
+    surface_residual = (sum(res_d) / len(res_d)) if res_d else 0.0
+    residual_pct = 100.0 * surface_residual / ref_size
+
+    delta = [final[i] - basis[i] for i in range(len(basis))]
 
     mags = [d.length for d in delta]
     mean_off = (sum(mags) / len(mags)) if mags else 0.0
@@ -215,10 +426,14 @@ def main():
     has_keys = bool(sk and sk.key_blocks)
     kept_keys = 0
     if cfg["shape_keys"] == "preserve" and has_keys:
-        # shift every key by the same per-vertex delta -> relative offsets kept
+        # shift every key by the same per-vertex delta -> relative offsets kept,
+        # and move the base mesh vertices too (the exporter writes those as the
+        # base; without this the file comes back unchanged).
         for kb in sk.key_blocks:
             for i, d in enumerate(delta):
                 kb.data[i].co = kb.data[i].co + d
+        for i, d in enumerate(delta):
+            src.data.vertices[i].co = src.data.vertices[i].co + d
         kept_keys = len(sk.key_blocks) - 1  # exclude Basis
     else:
         if has_keys:
@@ -250,7 +465,11 @@ def main():
         "reference_vertices": ref_vert_count,
         "mean_offset": mean_off,
         "max_offset": max_off,
+        "surface_residual": surface_residual,
+        "residual_pct": residual_pct,
         "strength": strength,
+        "landmarks": n_landmarks,
+        "sym_axis": cfg["sym_axis"],
         "notes": notes,
         "output": cfg["output"],
     }))

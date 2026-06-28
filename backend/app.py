@@ -9,6 +9,7 @@ Endpoints:
   GET  /api/download/{id}/{name} -> fetch a produced result file
 """
 import os
+import json
 import uuid
 import shutil
 
@@ -100,52 +101,113 @@ async def retopo_endpoint(
     })
 
 
-@app.post("/api/wrap")
-async def wrap_endpoint(
-    reference: UploadFile = File(...),
-    source: UploadFile = File(...),
-    strength: float = Form(1.0),
-    smooth_iters: int = Form(3),
-    shape_keys: str = Form("preserve"),
-    align: str = Form("bbox"),
-    out_format: str = Form("glb"),
-):
+def _safe_job_dir(job_id):
+    if not job_id or "/" in job_id or "\\" in job_id or ".." in job_id:
+        raise HTTPException(400, "bad job id")
+    job_dir = os.path.join(WORK, job_id)
+    if not os.path.isdir(job_dir):
+        raise HTTPException(404, "job not found")
+    return job_dir
+
+
+def _find_input(job_dir, stem):
+    for ext in SUPPORTED_IN:
+        p = os.path.join(job_dir, stem + ext)
+        if os.path.isfile(p):
+            return p
+    raise HTTPException(400, f"missing {stem} for this job")
+
+
+@app.post("/api/wrap/prepare")
+async def wrap_prepare(reference: UploadFile = File(...), source: UploadFile = File(...)):
+    """Phase 1: store both models and export index-preserving OBJs the UI uses
+    for display and landmark picking."""
     ref_ext = os.path.splitext(reference.filename or "")[1].lower()
     src_ext = os.path.splitext(source.filename or "")[1].lower()
     for ext in (ref_ext, src_ext):
         if ext not in SUPPORTED_IN:
             raise HTTPException(400, f"Unsupported input format '{ext}'.")
+
+    job_id = uuid.uuid4().hex
+    job_dir = os.path.join(WORK, job_id)
+    os.makedirs(job_dir, exist_ok=True)
+    ref_path = os.path.join(job_dir, "reference" + ref_ext)
+    src_path = os.path.join(job_dir, "source" + src_ext)
+    with open(ref_path, "wb") as f:
+        shutil.copyfileobj(reference.file, f)
+    with open(src_path, "wb") as f:
+        shutil.copyfileobj(source.file, f)
+
+    ref_obj = os.path.join(job_dir, "reference_view.obj")
+    src_obj = os.path.join(job_dir, "source_view.obj")
+    try:
+        data = wrap.prepare(ref_path, src_path, ref_obj, src_obj)
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+    return JSONResponse({
+        "job_id": job_id,
+        "reference_view_url": f"/api/download/{job_id}/reference_view.obj",
+        "source_view_url": f"/api/download/{job_id}/source_view.obj",
+        "reference_vertices": data.get("reference_vertices"),
+        "source_vertices": data.get("source_vertices"),
+        "source_shape_keys": data.get("source_shape_keys"),
+    })
+
+
+@app.post("/api/wrap")
+async def wrap_endpoint(
+    job_id: str = Form(...),
+    strength: float = Form(1.0),
+    smooth_iters: int = Form(3),
+    shape_keys: str = Form("preserve"),
+    align: str = Form("bbox"),
+    sym_axis: str = Form("none"),
+    out_format: str = Form("glb"),
+    landmarks: str = Form(""),
+):
+    """Phase 2: run the wrap using the job's stored models + picked landmarks."""
+    job_dir = _safe_job_dir(job_id)
+    ref_path = _find_input(job_dir, "reference")
+    src_path = _find_input(job_dir, "source")
+
     out_ext = "." + out_format.lower().lstrip(".")
     if out_ext not in SUPPORTED_OUT:
         raise HTTPException(400, f"Unsupported output format '{out_ext}'.")
     shape_keys = shape_keys.lower()
     if shape_keys not in ("preserve", "base"):
         raise HTTPException(400, "shape_keys must be preserve/base")
-    if align.lower() not in ("bbox", "none"):
+    align = align.lower()
+    if align not in ("bbox", "none"):
         raise HTTPException(400, "align must be bbox/none")
+    sym_axis = sym_axis.lower()
+    if sym_axis not in ("none", "x", "y", "z"):
+        raise HTTPException(400, "sym_axis must be none/x/y/z")
     strength = max(0.0, min(1.0, float(strength)))
     smooth_iters = max(0, min(50, int(smooth_iters)))
 
-    job_id = uuid.uuid4().hex
-    job_dir = os.path.join(WORK, job_id)
-    os.makedirs(job_dir, exist_ok=True)
+    lm_path = None
+    if landmarks.strip():
+        try:
+            lm = json.loads(landmarks)
+            ref_i = [int(x) for x in lm.get("ref", [])]
+            src_i = [int(x) for x in lm.get("src", [])]
+        except Exception:
+            raise HTTPException(400, "landmarks must be JSON {ref:[],src:[]}")
+        if min(len(ref_i), len(src_i)) >= 1:
+            lm_path = os.path.join(job_dir, "landmarks.json")
+            with open(lm_path, "w") as f:
+                json.dump({"ref": ref_i, "src": src_i}, f)
 
-    ref_path = os.path.join(job_dir, "reference" + ref_ext)
-    src_path = os.path.join(job_dir, "source" + src_ext)
     view_path = os.path.join(job_dir, "result.obj")
     out_name = "result" + out_ext
     out_path = os.path.join(job_dir, out_name)
-
-    with open(ref_path, "wb") as f:
-        shutil.copyfileobj(reference.file, f)
-    with open(src_path, "wb") as f:
-        shutil.copyfileobj(source.file, f)
-
     try:
         data = wrap.run_wrap(
             ref_path, src_path, out_path, view_path,
             strength=strength, smooth_iters=smooth_iters,
-            shape_keys=shape_keys, align=align.lower(),
+            shape_keys=shape_keys, align=align,
+            landmarks=lm_path, sym_axis=sym_axis,
         )
     except Exception as e:
         raise HTTPException(500, str(e))

@@ -129,10 +129,13 @@ export class ModelViewer {
     grid.position.y = -1.001; this.scene.add(grid);
 
     this.wireMat = new THREE.LineBasicMaterial({ color: 0x4f9dff });
-    this.models = {};        // key -> { group, surface, wire }
+    this.models = {};        // key -> { group, surface, wire, markers }
     this.active = null;
     this.showWire = true;
     this.showShade = true;
+    this.raycaster = new THREE.Raycaster();
+    this.pointer = new THREE.Vector2();
+    this.pickCallback = null;
 
     const loop = () => {
       this._resize();
@@ -176,11 +179,87 @@ export class ModelViewer {
         geom.edges, wireColor ? new THREE.LineBasicMaterial({ color: wireColor }) : this.wireMat);
       group.add(wire);
     }
+    const markers = new THREE.Group();
+    group.add(markers);
     this.scene.add(group);
     this._frame(group);
-    this.models[key] = { group, surface, wire };
+    const box = new THREE.Box3().setFromBufferAttribute(geom.surface.getAttribute("position"));
+    const localSize = box.getSize(new THREE.Vector3()).length() || 1;
+    this.models[key] = { group, surface, wire, markers, geom: geom.surface, localSize };
     if (!this.active) this.active = key;
     this._apply();
+  }
+
+  // ---- landmark picking ------------------------------------------------------
+  enablePicking(callback) {
+    this.pickCallback = callback;
+    if (this._pickBound) return;
+    this._pickBound = (ev) => this._onClick(ev);
+    this.canvas.addEventListener("pointerdown", this._down = (e) => {
+      this._downXY = [e.clientX, e.clientY];
+    });
+    this.canvas.addEventListener("pointerup", this._pickBound);
+  }
+
+  _onClick(ev) {
+    if (!this.pickCallback || !this.active) return;
+    // ignore drags (orbit) — only treat near-stationary clicks as picks
+    if (this._downXY) {
+      const dx = ev.clientX - this._downXY[0], dy = ev.clientY - this._downXY[1];
+      if (dx * dx + dy * dy > 25) return;
+    }
+    const m = this.models[this.active];
+    if (!m) return;
+    const r = this.canvas.getBoundingClientRect();
+    this.pointer.x = ((ev.clientX - r.left) / r.width) * 2 - 1;
+    this.pointer.y = -((ev.clientY - r.top) / r.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const hits = this.raycaster.intersectObject(m.surface, false);
+    if (!hits.length) return;
+    const hit = hits[0];
+    // nearest of the triangle's 3 vertices to the hit point -> vertex index
+    const pos = m.geom.getAttribute("position");
+    const lp = m.surface.worldToLocal(hit.point.clone());
+    let best = -1, bestD = Infinity;
+    for (const vi of [hit.face.a, hit.face.b, hit.face.c]) {
+      const dx = pos.getX(vi) - lp.x, dy = pos.getY(vi) - lp.y, dz = pos.getZ(vi) - lp.z;
+      const d = dx * dx + dy * dy + dz * dz;
+      if (d < bestD) { bestD = d; best = vi; }
+    }
+    if (best >= 0) this.pickCallback({ key: this.active, index: best });
+  }
+
+  _labelSprite(text, color) {
+    const c = document.createElement("canvas"); c.width = c.height = 64;
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.beginPath(); ctx.arc(32, 32, 30, 0, 7); ctx.fill();
+    ctx.fillStyle = "#fff"; ctx.font = "bold 36px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(text, 32, 34);
+    const tex = new THREE.CanvasTexture(c);
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
+    return spr;
+  }
+
+  // render markers for a model from a list of vertex indices
+  setMarkers(key, indices, color = 0xffffff) {
+    const m = this.models[key];
+    if (!m) return;
+    m.markers.clear();
+    const pos = m.geom.getAttribute("position");
+    const r = m.localSize * 0.012;
+    indices.forEach((vi, n) => {
+      if (vi == null || vi < 0 || vi >= pos.count) return;
+      const sph = new THREE.Mesh(
+        new THREE.SphereGeometry(r, 16, 12),
+        new THREE.MeshBasicMaterial({ color, depthTest: false }));
+      sph.renderOrder = 999;
+      sph.position.set(pos.getX(vi), pos.getY(vi), pos.getZ(vi));
+      const label = this._labelSprite(String(n + 1), color);
+      label.scale.setScalar(r * 3.2);
+      label.position.set(0, r * 2.2, 0);
+      sph.add(label);
+      m.markers.add(sph);
+    });
   }
 
   async setModelFromFile(key, file, opts) { this.setModel(key, await geometryFromFile(file), opts); }
