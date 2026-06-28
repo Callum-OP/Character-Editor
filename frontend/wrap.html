@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shape Match (Wrap) — Mesh Hub</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <aside id="panel">
+    <a class="hubnav" href="/">&larr; Mesh Hub</a>
+    <h1>Shape Match<br/><span class="thin">(Wrap)</span></h1>
+    <p class="sub">Deform your model's vertices to match a reference shape,
+      keeping your topology, features &amp; shape keys.</p>
+
+    <div id="engine" class="engine">Detecting engine&hellip;</div>
+
+    <label class="field">
+      <span>Reference model <em>(target shape)</em></span>
+      <input type="file" id="refFile" accept=".obj,.glb,.gltf,.fbx,.ply,.stl" />
+      <small>The shape you want to match.</small>
+    </label>
+
+    <label class="field">
+      <span>Your model <em>(to be reshaped)</em></span>
+      <input type="file" id="srcFile" accept=".obj,.glb,.gltf,.fbx,.ply,.stl" />
+      <small>Keeps its topology &amp; features; vertices move toward the reference.</small>
+    </label>
+
+    <label class="field">
+      <span>Wrap strength: <b id="strengthVal">100</b>%</span>
+      <input type="range" id="strength" min="0" max="100" step="5" value="100" />
+      <small>How far vertices move onto the reference surface (100% = fully conform).</small>
+    </label>
+
+    <label class="field">
+      <span>Smoothing passes: <b id="smoothVal">3</b></span>
+      <input type="range" id="smooth" min="0" max="15" step="1" value="3" />
+      <small>Relaxes the result to remove projection noise.</small>
+    </label>
+
+    <label class="field">
+      <span>Shape keys</span>
+      <select id="shapeKeys">
+        <option value="preserve" selected>Preserve shape keys</option>
+        <option value="base">Conform base only (drop keys)</option>
+      </select>
+      <small>Preserve keeps all blend shapes working on the reshaped mesh
+        (needs FBX/glTF output).</small>
+    </label>
+
+    <label class="field">
+      <span>Alignment</span>
+      <select id="align">
+        <option value="bbox" selected>Auto: match size &amp; center</option>
+        <option value="none">None (already aligned)</option>
+      </select>
+      <small>Optimised for heads/faces. Models should face the same way.</small>
+    </label>
+
+    <label class="field">
+      <span>Download format</span>
+      <select id="outFormat">
+        <option value="glb" selected>GLB (keeps shape keys)</option>
+        <option value="gltf">glTF (keeps shape keys)</option>
+        <option value="fbx">FBX (keeps shape keys)</option>
+        <option value="obj">OBJ (base only, no keys)</option>
+        <option value="ply">PLY</option>
+        <option value="stl">STL</option>
+      </select>
+    </label>
+
+    <button id="run" disabled>Wrap to reference</button>
+    <div id="status" class="status"></div>
+
+    <div id="stats" class="stats hidden"></div>
+    <a id="download" class="download hidden" download>Download result</a>
+
+    <footer>
+      <p>View:
+        <button class="seg" data-view="reference">Reference</button>
+        <button class="seg active" data-view="source">Your model</button>
+        <button class="seg" data-view="result">Wrapped</button>
+      </p>
+      <p>
+        <label class="check"><input type="checkbox" id="wire" checked /> Wireframe</label>
+        <label class="check"><input type="checkbox" id="shade" checked /> Shaded</label>
+      </p>
+    </footer>
+  </aside>
+
+  <main id="stage">
+    <div id="hint">Load a reference and your model to begin.</div>
+    <canvas id="view"></canvas>
+  </main>
+
+  <script type="module" src="wrap.js"></script>
+</body>
+</html>

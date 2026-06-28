@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mesh Hub</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="hub">
+  <header class="hub-header">
+    <h1>Mesh Hub</h1>
+    <p>A toolkit for cleaning up and reshaping 3D models. Pick a tool.</p>
+    <div id="hubEngine" class="engine">Detecting engine&hellip;</div>
+  </header>
+
+  <main class="hub-grid">
+    <a class="tool-card" href="/topology.html">
+      <div class="tool-icon">▦</div>
+      <h2>Auto Quad Topology</h2>
+      <p>Turn any model into clean quad / quad-dominant / triangle topology.
+         Optional hard mirror symmetry with a splittable center seam.</p>
+      <span class="go">Open tool →</span>
+    </a>
+
+    <a class="tool-card" href="/wrap.html">
+      <div class="tool-icon">⊹</div>
+      <h2>Shape Match (Wrap)</h2>
+      <p>Conform your model's vertices to a reference shape without changing
+         your topology — keep your features and shape keys, match the target.</p>
+      <span class="go">Open tool →</span>
+    </a>
+
+    <div class="tool-card disabled">
+      <div class="tool-icon">＋</div>
+      <h2>More coming</h2>
+      <p>This hub is built to grow — additional mesh tools will appear here.</p>
+      <span class="go muted">Planned</span>
+    </div>
+  </main>
+
+  <script type="module">
+    const el = document.getElementById("hubEngine");
+    try {
+      const e = await (await fetch("/api/engine")).json();
+      if (e.name) { el.textContent = "Engine ready: " + e.name + " ✓"; el.className = "engine ok"; }
+      else { el.innerHTML = "No engine found — install <b>Blender</b> (set BLENDER_PATH)."; el.className = "engine bad"; }
+    } catch { el.textContent = "Backend not reachable."; el.className = "engine bad"; }
+  </script>
+</body>
+</html>

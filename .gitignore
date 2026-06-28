@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+backend/work/*
+!backend/work/.gitkeep
+.venv/
+venv/
+.DS_Store
+reference

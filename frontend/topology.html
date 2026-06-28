@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Auto Quad Topology — Mesh Hub</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <aside id="panel">
+    <a class="hubnav" href="/">&larr; Mesh Hub</a>
+    <h1>Auto Quad<br/>Topology</h1>
+    <p class="sub">Upload a 3D model &rarr; get clean quad/tri topology.</p>
+
+    <div id="engine" class="engine">Detecting engine&hellip;</div>
+
+    <label class="field">
+      <span>Model file</span>
+      <input type="file" id="file" accept=".obj,.glb,.gltf,.fbx,.ply,.stl" />
+      <small>OBJ, GLB/glTF, FBX, PLY, STL</small>
+    </label>
+
+    <label class="field">
+      <span>Topology</span>
+      <select id="topology">
+        <option value="quad" selected>Quads — clean all-quad (QuadriFlow)</option>
+        <option value="quad_dominant">Quad-dominant (hybrid)</option>
+        <option value="triangle">Triangles</option>
+      </select>
+      <small id="topoHelp">All-quad flow, ideal for subdivision/animation.
+        Very thin parts (fingers, toes) may merge at low counts.</small>
+    </label>
+
+    <label class="field">
+      <span>Target face count: <b id="facesVal">5000</b></span>
+      <input type="range" id="faces" min="200" max="60000" step="100" value="5000" />
+      <small>Higher = closer to original, denser mesh. Approximate for
+        hybrid/triangle (adaptive density keeps detail where it matters).</small>
+    </label>
+
+    <label class="field">
+      <span>Download format</span>
+      <select id="outFormat">
+        <option value="obj" selected>OBJ (keeps quads)</option>
+        <option value="fbx">FBX (keeps quads)</option>
+        <option value="glb">GLB (triangulated)</option>
+        <option value="gltf">glTF (triangulated)</option>
+        <option value="ply">PLY</option>
+        <option value="stl">STL</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Symmetry (splittable seam)</span>
+      <select id="symAxis">
+        <option value="x" selected>Mirror across X — left / right</option>
+        <option value="y">Mirror across Y — top / bottom</option>
+        <option value="z">Mirror across Z — front / back</option>
+        <option value="none">None</option>
+      </select>
+      <small>Centers the model on the axis and builds identical topology on
+        both halves, with a clean center edge loop you can split on.</small>
+    </label>
+
+    <div class="field row">
+      <label class="check"><input type="checkbox" id="sharp" checked /> Keep sharp edges</label>
+      <label class="check"><input type="checkbox" id="symPlane" checked /> Show split plane</label>
+    </div>
+
+    <button id="run" disabled>Retopologize</button>
+    <div id="status" class="status"></div>
+
+    <div id="stats" class="stats hidden"></div>
+    <a id="download" class="download hidden" download>Download result</a>
+
+    <footer>
+      <p>View:
+        <button class="seg active" data-view="result">Quad result</button>
+        <button class="seg" data-view="original">Original</button>
+      </p>
+      <p>
+        <label class="check"><input type="checkbox" id="wire" checked /> Wireframe</label>
+        <label class="check"><input type="checkbox" id="shade" checked /> Shaded</label>
+      </p>
+    </footer>
+  </aside>
+
+  <main id="stage">
+    <div id="hint">Load a model to begin.</div>
+    <canvas id="view"></canvas>
+  </main>
+
+  <script type="module" src="topology.js"></script>
+</body>
+</html>
