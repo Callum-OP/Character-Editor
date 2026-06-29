@@ -1,7 +1,7 @@
-# Mesh Hub
+# MeshForge
 
-A web-based toolkit for cleaning up and reshaping 3D models. The landing page
-(`/`) is a hub linking to individual tools; it's built to grow.
+A web-based toolkit for preparing 3D characters & meshes. The landing page (`/`)
+is a hub linking to individual tools; it's built to grow.
 
 **Tools**
 1. **Auto Quad Topology** (`/topology.html`) — turn any model into clean quad /
@@ -9,18 +9,25 @@ A web-based toolkit for cleaning up and reshaping 3D models. The landing page
 2. **Shape Match (Wrap)** (`/wrap.html`) — conform your model's vertices to a
    reference shape *without changing your topology*, keeping your features and
    shape keys.
+3. **Character Rigger** (`/rig.html`) — auto-detect joints on a humanoid model,
+   tweak the markers, and build a skinned Mixamo-style skeleton (fingers + an
+   optional ARKit face). Ported from the reference 3D Auto Rigger.
+4. **Face Expressions** (`/face.html`) — generate the 52 ARKit facial shape keys
+   for a head model, then apply expressions (smile, surprise, blink…) live and
+   download the shape-keyed model.
 
 ## How it works
 
-- **Frontend** (`frontend/`) — a small static hub. Each tool is its own page
-  (`topology.html`, `wrap.html`) sharing a Three.js viewer module
-  (`viewer.js`, exposes `ModelViewer` + a true-quad OBJ parser).
-- **Backend** (`backend/`) — a FastAPI server that drives Blender headless and
-  returns results plus stats (`/api/retopo`, `/api/wrap`).
-- **Engine** — **Blender headless**. Topology uses its built-in **QuadriFlow**
-  remesher; the wrap tool uses a BVH nearest-surface projection computed in
-  bmesh/mathutils. Blender natively imports/exports OBJ, glTF/GLB, FBX, PLY,
-  STL. Optionally an **Instant Meshes** binary can be used for OBJ/PLY quads.
+- **Frontend** (`frontend/`) — a small static hub. Each tool is its own page.
+  Topology/Wrap/Face share a Three.js viewer; the Rigger uses a 2D marker editor
+  (`rig.js`) over a Blender-rendered front view + `<model-viewer>` for preview.
+- **Backend** (`backend/`) — a FastAPI server that drives Blender headless:
+  `/api/retopo`, `/api/wrap`, `/api/rig/prep`, `/api/rig/build`.
+- **Engine** — **Blender headless**. Topology uses **QuadriFlow**; Wrap uses a
+  BVH nearest-surface projection; the Rigger/Face tools run the reference
+  rigging pipeline (`backend/rigger/pipeline.py`: joint detection → skeleton fit
+  → voxel-proxy weight transfer; ARKit-52 shape keys via `face_shapekeys.py`).
+  Blender natively imports/exports OBJ, glTF/GLB, FBX, PLY, STL.
 
 ---
 
@@ -84,17 +91,23 @@ download is re-encoded from that exact mesh into the format you choose.
 
 ```
 backend/
-  app.py             FastAPI server + static hosting (/api/retopo, /api/wrap)
-  retopo.py          engine detection + invocation (Blender / Instant Meshes)
+  app.py             FastAPI server + static hosting (all /api/* endpoints)
+  retopo.py          quad engine detection + invocation (Blender / Instant Meshes)
   blender_remesh.py  runs inside Blender: import → QuadriFlow / voxel → export
-  wrap.py            wrap engine layer (drives Blender)
-  blender_wrap.py    runs inside Blender: BVH nearest-surface conform
+  wrap.py / blender_wrap.py   Shape Match engine + Blender script
+  rig.py             rigger engine layer (writes a job JSON, drives Blender)
+  rigger/            reference rigging pipeline, run inside Blender:
+                     pipeline.py, landmarks.py, markers.py, bone_naming.py,
+                     arkit.py, face_markers.py, face_shapekeys.py, render_views.py
   requirements.txt
 frontend/
   index.html         hub landing page (tool cards)
   topology.html / topology.js   Auto Quad Topology tool
   wrap.html / wrap.js           Shape Match (Wrap) tool
+  rig.html / rig.js / rig.css   Character Rigger (marker editor)
+  face.html / face.js           Face Expressions (morph-target preview)
   viewer.js          shared ModelViewer + true-quad OBJ parser
+  vendor/model-viewer.min.js    <model-viewer> for rig result preview
   style.css
 ```
 
@@ -180,8 +193,36 @@ head shape you want it to match. Wrap yours to the target and keep rigging it.
 - **Smoothing passes** — Laplacian relaxation of the displacement field.
 - **Shape keys** — *Preserve* (keep every blend shape working; needs FBX/glTF
   output) or *Conform base only* (drop keys).
+- **Preserve internal parts** *(mouth/teeth/eyes)* — keep inner geometry that the
+  reference doesn't have. See below.
 - **Alignment** — *Auto* matches bounding-box size & center; *None* assumes the
   models are pre-aligned. Both models should face the same way.
+
+## Preserving internal geometry (mouth, teeth, eyes)
+
+If your model has geometry *inside* it — an open mouth with teeth/tongue, eye
+interiors — and the reference is just an outer surface, plain projection would
+drag those inner vertices onto the outer face and flatten them. With this option
+on (default), the wrap:
+
+1. classifies each vertex as **internal** if it is *occluded* (a ray cast
+   outward along its normal hits the model itself — i.e. it sits in a pocket
+   like a mouth cavity or behind an eyelid) **or** has no good reference match;
+   everything else is **outer surface**. The occlusion test is reference-
+   independent, so a whole mouth interior is caught even when the reference's
+   mouth is shallow/closed — which is what stops the mouth getting flattened,
+2. conforms only the outer surface to the reference,
+3. **carries** each internal vertex by the displacement of the nearest outer-
+   surface vertices (a spatial, not edge-based, interpolation — so it works even
+   for separate islands like eyeballs or teeth, which would otherwise be left
+   behind and poke through).
+
+Because the carry uses the *surface directly covering* each internal part, an
+eyeball follows its eyelid and teeth follow the lips — they move and reshape with
+the surface in front of them instead of bulging through it. Verified by rendering
+a doll head wrapped to a different-shaped reference: the eyeballs sit inside the
+sockets and the teeth stay behind the lips, while the outer face matches the
+reference. Turning the option off projects everything (the old flattening).
 
 ## Landmark-guided matching
 
@@ -242,3 +283,44 @@ symmetry option raises mirror-symmetry substantially (≈100% on a symmetric bas
   (a strongly asymmetric base won't reach a perfect mirror).
 - Models should share a rough orientation; auto-align only matches size/center.
 - "Preserve shape keys" requires an output format that stores them (GLB/glTF/FBX).
+
+---
+
+# Tool 3 — Character Rigger
+
+Auto-rig a humanoid model. Ported from the reference **3D Auto Rigger** (the
+Blender pipeline is reused verbatim under `backend/rigger/`).
+
+**Flow:** drop a model (or "Rig a test figure") → **Rig model** (Blender renders
+a front view and auto-detects joints) → drag the joint markers onto the right
+spots (Mirror copies left↔right) → **Build rig** → preview and download `.glb` /
+`.fbx`. The skeleton is a Mixamo-style Humanoid hierarchy, skinned via a
+watertight voxel-proxy weight transfer.
+
+- **Fingers** — switch the overlay to *Hands* for a top-down close-up per hand
+  with draggable fingertip markers.
+- **Face shape keys** — tick *Facial shape keys (ARKit 52)*, switch to *Face*,
+  drag the anchors onto eyes/brows/nose/lips/chin; the output carries the
+  armature **and** the 52 ARKit shape keys on one mesh.
+- **Standard bones** — emit a figure-app-friendly bone naming so compatible apps
+  auto-recognize the rig.
+- **Head only** — produces ARKit face shape keys with no skeleton (same as the
+  Face Expressions tool's backend).
+
+Verified end-to-end: prep detects all 14 body joints + face markers + front
+render; build outputs a skinned GLB **and** FBX.
+
+# Tool 4 — Face Expressions
+
+Generate the **52 ARKit blendshapes** for a head model, then *apply expressions*.
+
+**Flow:** load a head → **Generate expressions** (Blender auto-detects the face
+band and builds the shape keys via `backend/rigger/face_shapekeys.py`) → the
+result loads in a Three.js viewer that drives the morph targets. Pick a **preset**
+(Smile, Surprise, Frown, Blink, Kiss, Angry, Disgust…) — each is a named
+combination of ARKit shapes — or fine-tune individual shapes with sliders. The
+downloaded GLB carries all 52 shape keys, ready for any ARKit-driven pipeline
+(VTubing, game engines, iPhone face capture).
+
+Verified: the generated GLB contains Basis + 52 correctly-named ARKit morph
+targets, driven live in the browser.

@@ -63,6 +63,12 @@ h1 .thin { font-weight: 300; color: var(--muted); }
 .landmarks .seg { flex: 1; text-align: center; }
 .markerinfo { font-size: 12px; color: var(--muted); margin-top: 6px; }
 
+.sliders { max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.sk-row { display: grid; grid-template-columns: 1fr 90px; align-items: center; gap: 8px; font-size: 11px; }
+.sk-name { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sk-row input[type=range] { width: 90px; accent-color: var(--accent); }
+
 #panel {
   width: 320px;
   min-width: 320px;

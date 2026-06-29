@@ -1,24 +1,28 @@
 """
-FastAPI server for the Mesh Hub (retopology + shape-match wrap tools).
+FastAPI server for MeshForge — the 3D character & mesh toolkit hub.
 
 Endpoints:
   GET  /                 -> serves the hub frontend
   GET  /api/engine       -> which retopology engine is available
   POST /api/retopo       -> upload a model, get back quad-remeshed model + stats
   POST /api/wrap         -> upload reference + source, get a conformed model
+  POST /api/rig/prep     -> detect joint/face markers + front view for editing
+  POST /api/rig/build    -> build the rig / face shape keys from markers
   GET  /api/download/{id}/{name} -> fetch a produced result file
 """
 import os
 import json
 import uuid
 import shutil
+import time
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import retopo
 import wrap
+import rig
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORK = os.path.join(HERE, "work")
@@ -166,6 +170,7 @@ async def wrap_endpoint(
     sym_axis: str = Form("none"),
     out_format: str = Form("glb"),
     landmarks: str = Form(""),
+    keep_internal: bool = Form(True),
 ):
     """Phase 2: run the wrap using the job's stored models + picked landmarks."""
     job_dir = _safe_job_dir(job_id)
@@ -208,7 +213,7 @@ async def wrap_endpoint(
             ref_path, src_path, out_path, view_path,
             strength=strength, smooth_iters=smooth_iters,
             shape_keys=shape_keys, align=align,
-            landmarks=lm_path, sym_axis=sym_axis,
+            landmarks=lm_path, sym_axis=sym_axis, keep_internal=keep_internal,
         )
     except Exception as e:
         raise HTTPException(500, str(e))
@@ -231,6 +236,137 @@ def download(job_id: str, name: str):
     if not os.path.isfile(path):
         raise HTTPException(404, "not found")
     return FileResponse(path, filename=name)
+
+
+# --------------------------------------------------------------------------- #
+# Character Rigger + Face Expressions (reference rigging pipeline in Blender)
+# Mirrors the original Node server's /api/prep + /api/rig contract so the ported
+# editor frontend works unchanged.
+# --------------------------------------------------------------------------- #
+RIG_WORK = os.path.join(WORK, "rig")
+os.makedirs(RIG_WORK, exist_ok=True)
+_rig_sessions = {}   # token -> {"model": path|None}
+_rig_files = {}      # token -> absolute path
+
+
+def _rig_register(path):
+    tok = uuid.uuid4().hex + os.path.splitext(path)[1].lower()
+    _rig_files[tok] = path
+    return tok
+
+
+@app.get("/api/rig/config")
+def rig_config():
+    return {"blender": retopo._find_blender()}
+
+
+@app.post("/api/rig/prep")
+async def rig_prep(request: Request, ext: str = "glb", test: str = "0", headOnly: str = "0"):
+    is_test = test == "1"
+    stamp = "%d_%s" % (int(time.time() * 1000), uuid.uuid4().hex[:6])
+    model_path = None
+    if not is_test:
+        safe_ext = "".join(c for c in ext.lower() if c.isalnum()) or "glb"
+        body = await request.body()
+        if not body:
+            raise HTTPException(400, "empty model upload")
+        model_path = os.path.join(RIG_WORK, "in_%s.%s" % (stamp, safe_ext))
+        with open(model_path, "wb") as f:
+            f.write(body)
+
+    markers_json = os.path.join(RIG_WORK, "markers_%s.json" % stamp)
+    front_png = os.path.join(RIG_WORK, "front_%s.png" % stamp)
+    fields = {"mode": "prep", "output": markers_json, "front_png": front_png}
+    if model_path:
+        fields["input"] = model_path
+    if headOnly == "1":
+        fields["head_only"] = True
+
+    try:
+        rig.run_job(fields)
+        with open(markers_json, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+    token = uuid.uuid4().hex
+    _rig_sessions[token] = {"model": model_path, "head_only": headOnly == "1"}
+    hand_urls = {}
+    for s, p in (data.get("hand_views") or {}).items():
+        hand_urls[s] = "/api/rig/files/" + _rig_register(p)
+    return JSONResponse({
+        "token": token,
+        "markers": data.get("markers"),
+        "faceMarkers": data.get("face_markers"),
+        "calib": data.get("calib"),
+        "frontUrl": "/api/rig/files/" + _rig_register(front_png),
+        "handViews": hand_urls,
+        "handCalib": data.get("hand_calib"),
+        "fingerMarkers": data.get("finger_markers"),
+    })
+
+
+@app.post("/api/rig/build")
+async def rig_build(request: Request):
+    body = json.loads((await request.body()).decode("utf-8") or "{}")
+    sess = _rig_sessions.get(body.get("token"))
+    if sess is None:
+        raise HTTPException(400, "unknown session — run prep first")
+
+    out = os.path.join(RIG_WORK, "rigged_%d_%s.glb" % (int(time.time() * 1000), uuid.uuid4().hex[:6]))
+    fields = {"output": out}
+    if sess.get("model"):
+        fields["input"] = sess["model"]
+
+    if body.get("headOnly"):
+        fields["face_only"] = True
+        if body.get("faceMarkers") and body.get("calib"):
+            fields["face_markers"] = body["faceMarkers"]
+            fields["calib"] = body["calib"]
+    else:
+        fields["fingers"] = body.get("fingers") is not False
+        if body.get("boneNaming"):
+            fields["bone_naming"] = body["boneNaming"]
+        if body.get("markers") and body.get("calib"):
+            fields["markers"] = body["markers"]
+            fields["calib"] = body["calib"]
+        if body.get("fingerMarkers") and body.get("handCalib"):
+            fields["finger_markers"] = body["fingerMarkers"]
+            fields["hand_calib"] = body["handCalib"]
+        if body.get("faceShapekeys"):
+            fields["face_shapekeys"] = True
+            if body.get("faceMarkers") and body.get("calib"):
+                fields["face_markers"] = body["faceMarkers"]
+                fields["calib"] = body["calib"]
+
+    try:
+        rig.run_job(fields)
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+    glb_tok = _rig_register(out)
+    resp = {"glbUrl": "/api/rig/files/" + glb_tok,
+            "glbDownload": "/api/rig/download/" + glb_tok}
+    fbx = out[:-4] + ".fbx" if out.lower().endswith(".glb") else None
+    if fbx and os.path.isfile(fbx):
+        resp["fbxDownload"] = "/api/rig/download/" + _rig_register(fbx)
+    return JSONResponse(resp)
+
+
+@app.get("/api/rig/files/{tok}")
+def rig_file(tok: str):
+    path = _rig_files.get(tok)
+    if not path or not os.path.isfile(path):
+        raise HTTPException(404, "not found")
+    return FileResponse(path)
+
+
+@app.get("/api/rig/download/{tok}")
+def rig_download(tok: str):
+    path = _rig_files.get(tok)
+    if not path or not os.path.isfile(path):
+        raise HTTPException(404, "not found")
+    return FileResponse(path, filename="rigged" + os.path.splitext(path)[1].lower())
 
 
 # Serve the frontend (mounted last so /api/* wins).

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Face Expressions — MeshForge</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <aside id="panel">
+    <a class="hubnav" href="/">&larr; MeshForge hub</a>
+    <h1>Face<br/>Expressions</h1>
+    <p class="sub">Generate ARKit-52 facial shape keys for a head model, then
+      apply expressions live.</p>
+
+    <div id="engine" class="engine">Detecting engine&hellip;</div>
+
+    <label class="field">
+      <span>Head / face model</span>
+      <input type="file" id="file" accept=".obj,.glb,.gltf,.fbx" />
+      <small>A head or face mesh (OBJ, GLB/glTF, FBX).</small>
+    </label>
+
+    <button id="run" disabled>Generate expressions</button>
+    <div id="status" class="status"></div>
+
+    <div id="exprPanel" class="hidden">
+      <label class="field">
+        <span>Expression preset</span>
+        <select id="preset"></select>
+      </label>
+      <div class="field">
+        <span>Fine-tune shapes <small id="skCount"></small></span>
+        <div id="sliders" class="sliders"></div>
+      </div>
+      <a id="download" class="download hidden" download>Download model + shape keys</a>
+    </div>
+
+    <footer>
+      <p>
+        <label class="check"><input type="checkbox" id="wire" /> Wireframe</label>
+        <button id="resetExpr" class="seg">Reset to neutral</button>
+      </p>
+    </footer>
+  </aside>
+
+  <main id="stage">
+    <div id="hint">Load a head model and generate its shape keys.</div>
+    <canvas id="view"></canvas>
+  </main>
+
+  <script type="module" src="face.js"></script>
+</body>
+</html>

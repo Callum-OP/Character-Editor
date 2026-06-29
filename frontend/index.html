@@ -3,13 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mesh Hub</title>
+  <title>MeshForge</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body class="hub">
   <header class="hub-header">
-    <h1>Mesh Hub</h1>
-    <p>A toolkit for cleaning up and reshaping 3D models. Pick a tool.</p>
+    <h1>MeshForge</h1>
+    <p>A toolkit for preparing 3D characters &amp; meshes — retopology, shape
+       matching, rigging and facial expressions. Pick a tool.</p>
     <div id="hubEngine" class="engine">Detecting engine&hellip;</div>
   </header>
 
@@ -27,6 +28,22 @@
       <h2>Shape Match (Wrap)</h2>
       <p>Conform your model's vertices to a reference shape without changing
          your topology — keep your features and shape keys, match the target.</p>
+      <span class="go">Open tool →</span>
+    </a>
+
+    <a class="tool-card" href="/rig.html">
+      <div class="tool-icon">⊿</div>
+      <h2>Character Rigger</h2>
+      <p>Auto-detect joints on a humanoid model, fine-tune the markers, then
+         build a skinned Mixamo-style skeleton (with fingers &amp; optional face).</p>
+      <span class="go">Open tool →</span>
+    </a>
+
+    <a class="tool-card" href="/face.html">
+      <div class="tool-icon">☺</div>
+      <h2>Face Expressions</h2>
+      <p>Generate ARKit-52 facial shape keys for a head model, then apply
+         expressions (smile, surprise, blink…) live and download the result.</p>
       <span class="go">Open tool →</span>
     </a>
 

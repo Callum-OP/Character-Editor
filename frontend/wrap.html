@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Shape Match (Wrap) — Mesh Hub</title>
+  <title>Shape Match (Wrap) — MeshForge</title>
   <link rel="stylesheet" href="style.css" />
   <script type="importmap">
   {
@@ -16,7 +16,7 @@
 </head>
 <body>
   <aside id="panel">
-    <a class="hubnav" href="/">&larr; Mesh Hub</a>
+    <a class="hubnav" href="/">&larr; MeshForge</a>
     <h1>Shape Match<br/><span class="thin">(Wrap)</span></h1>
     <p class="sub">Reshape your model's vertices to match a reference, keeping
       your topology, features &amp; shape keys.</p>
@@ -83,6 +83,14 @@
         <option value="preserve" selected>Preserve shape keys</option>
         <option value="base">Conform base only (drop keys)</option>
       </select>
+    </label>
+
+    <label class="field">
+      <span>Internal geometry</span>
+      <label class="check"><input type="checkbox" id="keepInternal" checked />
+        Preserve internal parts (mouth, teeth, eyes)</label>
+      <small>Inner geometry the reference doesn't have is carried along with the
+        surface instead of being flattened onto it.</small>
     </label>
 
     <label class="field">

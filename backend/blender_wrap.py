@@ -53,12 +53,15 @@ def argv_after_dashes():
 def parse_args(args):
     out = {"reference": None, "source": None, "output": None, "view_output": None,
            "strength": 1.0, "smooth_iters": 3, "shape_keys": "preserve", "align": "bbox",
-           "landmarks": None, "sym_axis": "none",
+           "landmarks": None, "sym_axis": "none", "keep_internal": True,
+           "dilate": 0,
            "prepare": False, "ref_out": None, "src_out": None}
     i = 0
     while i < len(args):
         a = args[i]
-        if a == "--prepare": out["prepare"] = True; i += 1
+        if a == "--project-all": out["keep_internal"] = False; i += 1
+        elif a == "--dilate": out["dilate"] = int(args[i + 1]); i += 2
+        elif a == "--prepare": out["prepare"] = True; i += 1
         elif a == "--ref-out": out["ref_out"] = args[i + 1]; i += 2
         elif a == "--src-out": out["src_out"] = args[i + 1]; i += 2
         elif a == "--reference": out["reference"] = args[i + 1]; i += 2
@@ -431,61 +434,154 @@ def main():
         pass
     ref = None
 
-    # Iterative project-and-relax: snap onto the reference, then alternately
-    # relax (even out vertex spacing) and re-project. Keeping the result ON the
-    # surface every pass is what makes the fit accurate — the old approach
-    # smoothed the displacement off the surface, which loosened the match.
     adj = build_adjacency(src)
 
-    def project(positions):
-        out, miss = [], 0
-        for p in positions:
-            loc, _n, _idx, _d = bvh.find_nearest(p)
-            if loc is None:
-                miss += 1; out.append(p)
-            else:
-                out.append(loc)
-        return out, miss
+    # Source vertex normals (basis) — used to tell outer surface from internal
+    # geometry (mouth bag, teeth, eye interiors), which face inward.
+    nbm = bmesh.new()
+    nbm.from_mesh(src.data)
+    nbm.normal_update()
+    nbm.verts.ensure_lookup_table()
+    src_norms = [nbm.verts[i].normal.copy() for i in range(len(basis))]
+    nbm.free()
 
-    def relax(positions, factor=0.5):
-        new = positions[:]
-        for i, nb in enumerate(adj):
-            if not nb:
-                continue
-            avg = mathutils.Vector((0.0, 0.0, 0.0))
-            for j in nb:
-                avg += positions[j]
-            avg /= len(nb)
-            new[i] = positions[i].lerp(avg, factor)
-        return new
+    # ---- classify: conform (outer surface) vs carry (internal) -------------
+    # A vertex is INTERNAL (carried, not projected) if either:
+    #   (a) it is occluded — a ray cast outward along its normal hits the model
+    #       itself, i.e. it sits in a pocket (mouth cavity, behind an eyelid), or
+    #   (b) it has no good reference match (inward-facing / far).
+    # The occlusion test is reference-independent, so it reliably catches a whole
+    # mouth interior even when the reference's mouth is shallow/closed — which is
+    # what stops the mouth getting flattened onto the reference.
+    conform = [True] * len(basis)
+    n_internal = 0
+    if cfg["keep_internal"] and strength > 0.0:
+        # BVH of the source surface itself, for the occlusion ray test
+        sbm = bmesh.new()
+        sbm.from_mesh(src.data)
+        bmesh.ops.triangulate(sbm, faces=sbm.faces[:])
+        src_bvh = BVHTree.FromBMesh(sbm)
+        sbm.free()
+        _slo, _shi = bbox(src)
+        src_size = max((_shi - _slo)[i] for i in range(3)) or 1.0
+        eps = src_size * 1e-4
+        occl_thr = src_size * 0.35
+        dist_thr = ref_size * 0.12
+        for i, p in enumerate(basis):
+            n = src_norms[i]
+            hit, _hn, _hi, hdist = src_bvh.ray_cast(p + n * eps, n)
+            occluded = hit is not None and hdist is not None and hdist < occl_thr
+            wp = warped[i]
+            loc, nrm, _idx, dist = bvh.find_nearest(wp)
+            ref_ok = (loc is not None and dist <= dist_thr
+                      and nrm is not None and n.dot(nrm) > 0.1)
+            ok = ref_ok and not occluded
+            conform[i] = ok
+            if not ok:
+                n_internal += 1
+        if len(basis) - n_internal < max(8, int(0.05 * len(basis))):
+            conform = [True] * len(basis); n_internal = 0
+            notes.append("internal detection found little outer surface; projected all")
+        elif n_internal and cfg["dilate"] > 0:
+            # Optionally dilate the carried region a few edge-rings into the
+            # surface so openings (mouth/eye rims) are preserved. Off by default:
+            # it decouples internal parts (eyeballs) from the surface in front of
+            # them, which can make them bulge through; with dilate=0 internal
+            # parts follow their covering surface.
+            carry_set = set(i for i in range(len(basis)) if not conform[i])
+            for _ in range(cfg["dilate"]):
+                ring = set()
+                for i in carry_set:
+                    ring.update(adj[i])
+                carry_set |= ring
+            for i in carry_set:
+                conform[i] = False
+    conform_idx = [i for i in range(len(basis)) if conform[i]]
+    carry_idx = [i for i in range(len(basis)) if not conform[i]]
+    n_carry = len(carry_idx)
+    if n_internal:
+        extra = n_carry - n_internal
+        msg = "kept %d internal vertices (carried with the covering surface)" % n_internal
+        if extra:
+            msg += " + %d surrounding (dilated)" % extra
+        notes.append(msg)
 
+    # ---- displacement field d, added to the warped positions ---------------
+    d = [mathutils.Vector((0.0, 0.0, 0.0)) for _ in basis]
     misses = 0
     if strength > 0.0:
-        positions, misses = project(warped)
+        # conform vertices: project onto the reference (with strength)
+        for i in conform_idx:
+            loc, _n, _idx, _dd = bvh.find_nearest(warped[i])
+            if loc is None:
+                misses += 1
+            else:
+                d[i] = (loc - warped[i]) * strength
+        # smooth the conform displacement and re-project (even, accurate fit)
         for _ in range(cfg["smooth_iters"]):
-            positions = relax(positions, 0.5)
-            positions, _m = project(positions)   # re-snap so relax stays on-surface
-        final = [basis[i].lerp(positions[i], strength) for i in range(len(basis))]
-    else:
-        # strength 0 -> landmark morph only (no surface snapping)
-        positions = warped[:]
-        for _ in range(cfg["smooth_iters"]):
-            positions = relax(positions, 0.5)
-        final = positions
+            nd = list(d)
+            for i in conform_idx:
+                nb = [j for j in adj[i] if conform[j]]
+                if nb:
+                    avg = mathutils.Vector((0.0, 0.0, 0.0))
+                    for j in nb:
+                        avg += d[j]
+                    avg /= len(nb)
+                    nd[i] = d[i].lerp(avg, 0.5)
+            d = nd
+            for i in conform_idx:
+                loc, _n, _idx, _dd = bvh.find_nearest(warped[i] + d[i])
+                if loc is not None:
+                    d[i] = (loc - warped[i]) * strength
+        # Carry internal parts by SPATIAL interpolation of the surface
+        # displacement: each internal vertex takes the distance-weighted
+        # displacement of the nearest outer-surface vertices. Unlike edge
+        # diffusion this works across disconnected islands (eyeballs, teeth),
+        # which otherwise stay put while the surface moves and poke through.
+        if carry_idx and conform_idx:
+            ckd = KDTree(len(conform_idx))
+            for n, i in enumerate(conform_idx):
+                ckd.insert(warped[i], n)
+            ckd.balance()
+            K = min(8, len(conform_idx))
+            for i in carry_idx:
+                acc = mathutils.Vector((0.0, 0.0, 0.0))
+                wsum = 0.0
+                for _co, n, dist in ckd.find_n(warped[i], K):
+                    w = 1.0 / (dist + 1e-6)
+                    acc += d[conform_idx[n]] * w
+                    wsum += w
+                if wsum > 0.0:
+                    d[i] = acc / wsum
     if misses:
-        notes.append("%d vertices had no nearby reference surface" % misses)
+        notes.append("%d surface vertices had no nearby reference" % misses)
+
+    final = [warped[i] + d[i] for i in range(len(basis))]
 
     if cfg["sym_axis"] in AXIS_INDEX:
         final = symmetrize_positions(final, basis, AXIS_INDEX[cfg["sym_axis"]])
 
-    # accuracy readout: how far the final surface sits from the reference
+    # accuracy readout over the conformed (outer) surface only
     res_d = []
-    for fp in final:
-        loc, _n, _i, d = bvh.find_nearest(fp)
+    for i in conform_idx:
+        loc, _n, _i2, dd = bvh.find_nearest(final[i])
         if loc is not None:
-            res_d.append(d)
+            res_d.append(dd)
     surface_residual = (sum(res_d) / len(res_d)) if res_d else 0.0
     residual_pct = 100.0 * surface_residual / ref_size
+
+    # how far the carried (internal) parts sit off the reference surface (depth),
+    # and how many ended up on the OUTER side (poking through) — should be low.
+    car_d = []
+    outside = 0
+    for i in carry_idx:
+        loc, nrm, _i2, dd = bvh.find_nearest(final[i])
+        if loc is not None:
+            car_d.append(dd)
+            if nrm is not None and (final[i] - loc).dot(nrm) > ref_size * 0.002:
+                outside += 1
+    internal_depth_pct = 100.0 * (sum(car_d) / len(car_d)) / ref_size if car_d else 0.0
+    internal_outside_pct = 100.0 * outside / len(carry_idx) if carry_idx else 0.0
 
     delta = [final[i] - basis[i] for i in range(len(basis))]
 
@@ -538,6 +634,9 @@ def main():
         "max_offset": max_off,
         "surface_residual": surface_residual,
         "residual_pct": residual_pct,
+        "internal_kept": n_internal,
+        "internal_depth_pct": internal_depth_pct,
+        "internal_outside_pct": internal_outside_pct,
         "strength": strength,
         "landmarks": n_landmarks,
         "sym_axis": cfg["sym_axis"],

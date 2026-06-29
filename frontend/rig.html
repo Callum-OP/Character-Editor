@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Character Rigger — MeshForge</title>
+    <link rel="stylesheet" href="/rig.css" />
+    <script type="module" src="/vendor/model-viewer.min.js"></script>
+  </head>
+  <body>
+    <header>
+      <a class="hubnav" href="/" style="color:#8a94a3;text-decoration:none;font-size:12px;font-weight:600;display:inline-block;margin:8px 0 0 18px">&larr; MeshForge hub</a>
+      <h1>Character&nbsp;Rigger <span class="tag">humanoid body rig + ARKit face shapes · runs in your browser</span></h1>
+    </header>
+
+    <main>
+      <section id="dropzone" class="dropzone">
+        <div class="drop-inner">
+          <p class="drop-title">Drop a humanoid model here</p>
+          <p class="drop-sub">.glb · .gltf · .obj · .fbx</p>
+          <input type="file" id="fileInput" accept=".glb,.gltf,.obj,.fbx" hidden />
+          <button id="browseBtn" class="btn">Browse…</button>
+          <p class="drop-or">or</p>
+          <button id="testBtn" class="btn btn-ghost">Rig a test figure</button>
+          <div class="input-type" id="inputType">
+            <span class="input-type-label">Input is a</span>
+            <button class="btn input-type-btn active" id="typeBodyBtn" type="button">full body</button>
+            <button class="btn input-type-btn" id="typeHeadBtn" type="button">head only</button>
+          </div>
+          <p class="drop-sub" id="inputTypeHint">Body → skeleton + optional face shapes. Head only → ARKit face shapes, no skeleton.</p>
+        </div>
+      </section>
+
+      <section class="stage">
+        <div class="viewer-wrap">
+          <model-viewer
+            id="viewer"
+            camera-controls
+            autoplay
+            shadow-intensity="1"
+            exposure="1.0"
+            environment-image="neutral"
+          ></model-viewer>
+          <div id="viewerPlaceholder" class="viewer-placeholder">
+            The rigged result will appear here.
+          </div>
+
+          <div id="editor" class="editor hidden">
+            <div id="editorStage" class="editor-stage">
+              <img id="editorImg" class="editor-img" alt="front view" />
+              <div id="markerLayer" class="marker-layer"></div>
+            </div>
+            <div id="zoomCtl" class="zoom-ctl hidden">
+              <button id="zoomInBtn" class="zoom-btn" type="button" title="Zoom in">+</button>
+              <button id="zoomOutBtn" class="zoom-btn" type="button" title="Zoom out">−</button>
+            </div>
+            <div id="groupCtl" class="group-ctl hidden">
+              <span class="group-lbl">All markers</span>
+              <button id="grpScaleUp" class="zoom-btn" type="button" title="Scale markers bigger">⊕</button>
+              <button id="grpScaleDown" class="zoom-btn" type="button" title="Scale markers smaller">⊖</button>
+            </div>
+            <label class="editor-mirror">
+              <input type="checkbox" id="mirrorChk" checked />
+              Mirror left/right
+            </label>
+            <p class="editor-hint" id="editorHint">
+              Drag each dot onto the matching joint, then Build rig.
+            </p>
+          </div>
+        </div>
+
+        <aside class="panel">
+          <div class="file-row">
+            <span class="label">Input</span>
+            <span id="inputName" class="value">— none —</span>
+          </div>
+          <button id="rigBtn" class="btn btn-primary" disabled>Rig model</button>
+          <button id="buildBtn" class="btn btn-primary hidden">Build rig from markers</button>
+          <label class="opt-row hidden" id="fingersRow">
+            <input type="checkbox" id="fingersChk" checked />
+            Finger bones
+          </label>
+          <label class="opt-row hidden" id="stdBonesRow">
+            <input type="checkbox" id="stdBonesChk" />
+            Standard bones (auto-recognize)
+          </label>
+          <label class="opt-row hidden" id="faceRow">
+            <input type="checkbox" id="faceChk" />
+            Facial shape keys (ARKit&nbsp;52)
+          </label>
+          <div class="mode-row hidden" id="modeRow">
+            <button class="btn mode-btn active" id="bodyModeBtn" type="button">Body joints</button>
+            <button class="btn mode-btn hidden" id="faceModeBtn" type="button">Face</button>
+            <button class="btn mode-btn hidden" id="handsModeBtn" type="button">Hands</button>
+          </div>
+          <div class="mode-row hidden" id="handSideRow">
+            <button class="btn mode-btn active" id="handLBtn" type="button">Left hand</button>
+            <button class="btn mode-btn" id="handRBtn" type="button">Right hand</button>
+          </div>
+          <button id="resetBtn" class="btn hidden">↺ Reset markers</button>
+          <button id="backBtn" class="btn hidden">← Back</button>
+          <button id="saveFbxBtn" class="btn btn-accent" disabled>Download .fbx</button>
+          <button id="saveBtn" class="btn" disabled>Download .glb</button>
+
+          <div class="log-header">Status</div>
+          <ol id="log" class="log"></ol>
+        </aside>
+      </section>
+    </main>
+
+    <script src="/rig.js"></script>
+  </body>
+</html>

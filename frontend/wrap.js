@@ -230,6 +230,7 @@ el("run").addEventListener("click", async () => {
   fd.append("align", el("align").value);
   fd.append("sym_axis", symAxis());
   fd.append("out_format", el("outFormat").value);
+  fd.append("keep_internal", el("keepInternal").checked);
   if (marks.reference.length)
     fd.append("landmarks", JSON.stringify({ ref: marks.reference, src: marks.source }));
   try {
@@ -256,6 +257,7 @@ function showStats(s) {
     ["Shape keys", s.shape_key_mode],
     ["Kept shape keys", s.shape_keys != null ? fmt(s.shape_keys) : "—"],
     ["Your vertices", fmt(s.source_vertices)],
+    ["Internal kept", s.internal_kept != null ? fmt(s.internal_kept) : "—"],
     ["Surface match", s.residual_pct != null
       ? (s.residual_pct < 0.01 ? "exact" : (100 - s.residual_pct).toFixed(1) + "%") : "?"],
     ["Mean vertex move", s.mean_offset != null ? s.mean_offset.toFixed(4) : "?"],
