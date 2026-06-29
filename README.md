@@ -1,4 +1,4 @@
-# MeshForge
+# Character Editor
 
 A web-based toolkit for preparing 3D characters & meshes. The landing page (`/`)
 is a hub linking to individual tools; it's built to grow.

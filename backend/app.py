@@ -1,5 +1,5 @@
 """
-FastAPI server for MeshForge — the 3D character & mesh toolkit hub.
+FastAPI server for Character Editor — the 3D character & mesh toolkit hub.
 
 Endpoints:
   GET  /                 -> serves the hub frontend
@@ -32,7 +32,7 @@ os.makedirs(WORK, exist_ok=True)
 SUPPORTED_IN = {".obj", ".glb", ".gltf", ".fbx", ".ply", ".stl"}
 SUPPORTED_OUT = {".obj", ".glb", ".gltf", ".fbx", ".ply", ".stl"}
 
-app = FastAPI(title="3D Auto Quad Topology")
+app = FastAPI(title="Character Editor")
 
 
 @app.get("/api/engine")
