@@ -329,6 +329,27 @@ def smooth_field(delta, adj, iterations, factor=0.5):
     return delta
 
 
+def finalize_smooth_normals(obj):
+    """Make the exported normals follow the geometry (and the shape keys).
+
+    The source models carry baked custom split normals (auto-smooth). Those are
+    fixed vectors that don't move when we conform the base or when a shape key
+    deforms the mesh, so the shading breaks up into facets the moment a blend
+    shape is applied in another program ("polygony"). Clearing them lets Blender
+    derive smooth normals from the real surface — including the per-morph normals
+    written into the glTF shape keys — so every key shades correctly. Faces are
+    also flagged smooth so importers that recompute normals don't fall back to
+    flat shading."""
+    make_active(obj)
+    try:
+        bpy.ops.mesh.customdata_custom_splitnormals_clear()
+    except Exception:
+        pass
+    for p in obj.data.polygons:
+        p.use_smooth = True
+    obj.data.update()
+
+
 def prepare(cfg):
     """Import both models and re-export each as an OBJ that preserves vertex
     order, so the UI can place landmarks as vertex indices that map exactly to
@@ -612,6 +633,10 @@ def main():
             src.data.vertices[i].co = basis[i] + d
 
     src.data.update()
+
+    # Recompute smooth normals from the conformed surface so every shape key
+    # shades correctly in external programs (baked custom normals don't deform).
+    finalize_smooth_normals(src)
 
     # export the conformed base as OBJ for the viewer
     if cfg["view_output"]:

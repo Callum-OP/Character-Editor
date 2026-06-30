@@ -435,7 +435,12 @@ def export_model(path):
             bpy.ops.export_scene.obj(filepath=path)
     elif ext in (".glb", ".gltf"):
         fmt = "GLB" if ext == ".glb" else "GLTF_SEPARATE"
-        bpy.ops.export_scene.gltf(filepath=path, export_format=fmt)
+        # Export shape keys as morph targets WITH their own normals so deformed
+        # blend shapes shade smoothly instead of faceting in other programs.
+        bpy.ops.export_scene.gltf(
+            filepath=path, export_format=fmt, export_normals=True,
+            export_morph=True, export_morph_normal=True,
+        )
     elif ext == ".fbx":
         bpy.ops.export_scene.fbx(filepath=path)
     elif ext == ".ply":
