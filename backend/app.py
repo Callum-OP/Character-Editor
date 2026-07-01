@@ -8,6 +8,7 @@ Endpoints:
   POST /api/wrap         -> upload reference + source, get a conformed model
   POST /api/rig/prep     -> detect joint/face markers + front view for editing
   POST /api/rig/build    -> build the rig / face shape keys from markers
+  POST /api/cloth/convert -> transcode a browser-draped garment to FBX/etc.
   GET  /api/download/{id}/{name} -> fetch a produced result file
 """
 import os
@@ -222,6 +223,42 @@ async def wrap_endpoint(
         "job_id": job_id,
         "stats": data,
         "view_url": f"/api/download/{job_id}/result.obj",
+        "download_url": f"/api/download/{job_id}/{out_name}",
+        "download_name": out_name,
+    })
+
+
+@app.post("/api/cloth/convert")
+async def cloth_convert(file: UploadFile = File(...), out_format: str = Form("fbx")):
+    """Transcode a garment draped in the browser (uploaded as GLB) into another
+    format. Browsers write GLB/OBJ themselves; FBX/glTF/PLY/STL go through the
+    retopology engine's import->export (convert-only, no remeshing)."""
+    out_ext = "." + out_format.lower().lstrip(".")
+    if out_ext not in SUPPORTED_OUT:
+        raise HTTPException(400, f"Unsupported output format '{out_ext}'.")
+    in_ext = os.path.splitext(file.filename or "")[1].lower() or ".glb"
+    if in_ext not in SUPPORTED_IN:
+        raise HTTPException(400, f"Unsupported input format '{in_ext}'.")
+
+    job_id = uuid.uuid4().hex
+    job_dir = os.path.join(WORK, job_id)
+    os.makedirs(job_dir, exist_ok=True)
+    in_path = os.path.join(job_dir, "cloth_in" + in_ext)
+    with open(in_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    out_name = "garment" + out_ext
+    out_path = os.path.join(job_dir, out_name)
+    try:
+        if out_ext == in_ext:
+            shutil.copy(in_path, out_path)
+        else:
+            retopo.convert_format(in_path, out_path)
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+    return JSONResponse({
+        "job_id": job_id,
         "download_url": f"/api/download/{job_id}/{out_name}",
         "download_name": out_name,
     })

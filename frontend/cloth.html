@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cloth Studio — Character Editor</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <aside id="panel">
+    <a class="hubnav" href="/">&larr; Character Editor</a>
+    <h1>Cloth<br/>Studio</h1>
+    <p class="sub">Physics-based cloth draping: pick a preset pattern <em>or drop
+      in your own garment mesh</em>, put it on a body (built-in or your own posed
+      character) and let gravity + collision settle it into real folds and wrinkles.</p>
+
+    <div id="engine" class="engine">Detecting engine&hellip;</div>
+
+    <details class="grp" open>
+      <summary>Body</summary>
+      <label class="field">
+        <span>Body model <small>(optional)</small></span>
+        <input type="file" id="body" accept=".obj,.glb,.gltf,.fbx,.ply,.stl" />
+        <small>The garment drapes &amp; collides on this. Empty = built-in mannequin. Not exported.</small>
+      </label>
+      <div class="field row">
+        <label class="check"><input type="checkbox" id="showBody" checked /> Show body</label>
+        <label class="check"><input type="checkbox" id="floor" /> Floor</label>
+      </div>
+    </details>
+
+    <details class="grp" open>
+      <summary>Garment</summary>
+      <label class="field">
+        <span>Source</span>
+        <select id="garmentSource">
+          <option value="preset" selected>Preset pattern</option>
+          <option value="custom">Custom mesh file</option>
+        </select>
+      </label>
+
+      <div id="presetControls">
+        <label class="field">
+          <span>Pattern</span>
+          <select id="garment">
+            <option value="skirt" selected>Gathered skirt</option>
+            <option value="tshirt">T-shirt</option>
+            <option value="shorts">Shorts</option>
+            <option value="dress">Dress (strapless)</option>
+            <option value="cloak">Long cloak</option>
+            <option value="cape">Cape (back)</option>
+            <option value="poncho">Poncho</option>
+            <option value="scarf">Scarf</option>
+            <option value="sheet">Flat sheet</option>
+          </select>
+          <small>Sized to the body. Re-pick or change fullness to rebuild.</small>
+        </label>
+        <label class="field"><span>Fullness <small>(extra material → more folds)</small>: <b id="fullnessVal">1.30</b></span>
+          <input type="range" id="fullness" min="1" max="2.2" step="0.05" value="1.3" /></label>
+        <label class="field">
+          <span>Mesh detail</span>
+          <select id="detail">
+            <option value="1">Coarse (fast)</option>
+            <option value="2" selected>Medium</option>
+            <option value="3">Fine (slow, crisp wrinkles)</option>
+          </select>
+        </label>
+      </div>
+
+      <div id="customControls" class="hidden">
+        <label class="field">
+          <span>Garment model</span>
+          <input type="file" id="garmentFile" accept=".obj,.glb,.gltf,.fbx,.ply,.stl" />
+          <small>Your own garment mesh (e.g. a t-shirt). Its top edge is pinned; the
+            rest drapes under gravity + collision.</small>
+        </label>
+        <label class="check" id="shareSpaceRow"><input type="checkbox" id="shareSpace" checked />
+          Align to body's coordinate space</label>
+        <small id="shareSpaceHint">On: garment &amp; body are treated as authored in the same
+          scene (best when your reference body is posed for this garment). Off: auto-fit
+          the garment onto the body's upper half.</small>
+        <label class="field"><span>Pin top: <b id="pinTopVal">12%</b></span>
+          <input type="range" id="pinTop" min="0" max="0.5" step="0.01" value="0.12" /></label>
+        <label class="field"><span>Fit scale: <b id="fitScaleVal">1.00</b></span>
+          <input type="range" id="fitScale" min="0.3" max="2.5" step="0.01" value="1" /></label>
+        <label class="field"><span>Fit height: <b id="fitOffsetVal">0.00</b></span>
+          <input type="range" id="fitOffset" min="-0.5" max="0.5" step="0.01" value="0" /></label>
+      </div>
+
+      <button id="rebuild" class="seg">↻ Rebuild garment</button>
+    </details>
+
+    <details class="grp" open>
+      <summary>Fabric</summary>
+      <label class="field">
+        <span>Preset</span>
+        <select id="preset">
+          <option value="cotton" selected>Cotton</option>
+          <option value="silk">Silk (fine folds)</option>
+          <option value="chiffon">Chiffon (very soft)</option>
+          <option value="denim">Denim (stiff)</option>
+          <option value="leather">Leather (heavy, stiff)</option>
+          <option value="wool">Wool</option>
+        </select>
+      </label>
+      <label class="field"><span>Stretch stiffness: <b id="stretchVal"></b></span>
+        <input type="range" id="stretch" min="0" max="1" step="0.01" value="0.95" /></label>
+      <label class="field"><span>Bend / wrinkle stiffness: <b id="bendVal"></b></span>
+        <input type="range" id="bend" min="0" max="1" step="0.01" value="0.32" /></label>
+      <label class="field"><span>Weight <small>(mass)</small>: <b id="massVal"></b></span>
+        <input type="range" id="mass" min="0.05" max="1.2" step="0.01" value="0.3" /></label>
+      <label class="field"><span>Friction: <b id="frictionVal"></b></span>
+        <input type="range" id="friction" min="0" max="0.95" step="0.01" value="0.55" /></label>
+      <div class="field row">
+        <label class="check"><input type="color" id="color" value="#b5483f" /> Colour</label>
+        <label class="check"><input type="checkbox" id="dbl" checked /> Two-sided</label>
+      </div>
+    </details>
+
+    <details class="grp" open>
+      <summary>Simulate</summary>
+      <label class="field"><span>Gravity: <b id="gravityVal"></b></span>
+        <input type="range" id="gravity" min="0" max="20" step="0.5" value="9.8" /></label>
+      <label class="field"><span>Wind: <b id="windVal"></b></span>
+        <input type="range" id="wind" min="0" max="8" step="0.1" value="0" /></label>
+      <div class="field row" style="display:flex;gap:6px">
+        <button id="play" class="seg active">▶ Drape</button>
+        <button id="step" class="seg">⤼ Step</button>
+        <button id="resetSim" class="seg">↺ Reset</button>
+      </div>
+      <div id="simStat" class="status">Idle — press Drape.</div>
+    </details>
+
+    <details class="grp">
+      <summary>Pinning</summary>
+      <small>Pins hold cloth in place (e.g. a waistband or shoulders). Templates
+        auto-pin. Use the brush to add / remove pins by hand.</small>
+      <div class="field row" style="display:flex;gap:6px">
+        <button id="pinAdd" class="seg active">📌 Pin</button>
+        <button id="pinDel" class="seg">✂ Unpin</button>
+        <button id="pinOff" class="seg">✋ Off</button>
+      </div>
+      <label class="field"><span>Brush size: <b id="brushVal">3</b></span>
+        <input type="range" id="brush" min="1" max="12" step="1" value="3" /></label>
+      <div class="field row">
+        <label class="check"><input type="checkbox" id="pinMirror" checked /> Mirror X</label>
+        <label class="check"><input type="checkbox" id="showPins" checked /> Show pins</label>
+      </div>
+      <button id="unpinAll" class="seg">Clear all pins</button>
+    </details>
+
+    <label class="field">
+      <span>Export format</span>
+      <select id="outFormat">
+        <option value="glb" selected>GLB</option>
+        <option value="obj">OBJ</option>
+        <option value="fbx">FBX</option>
+        <option value="gltf">glTF</option>
+        <option value="ply">PLY</option>
+        <option value="stl">STL</option>
+      </select>
+      <small>Exports the draped garment as-is. GLB/OBJ in-browser; others via Blender.</small>
+    </label>
+    <button id="export">Export garment</button>
+    <div id="status" class="status"></div>
+
+    <footer>
+      <p><button id="shot" class="seg">📷 Screenshot</button></p>
+      <p class="sub">Drag empty = orbit · with a pin tool active, drag the cloth to paint pins</p>
+    </footer>
+  </aside>
+
+  <main id="stage">
+    <div id="hint">Pick a garment and press <b>Drape</b> to let it settle.</div>
+    <canvas id="view"></canvas>
+  </main>
+
+  <script type="module" src="cloth.js"></script>
+</body>
+</html>

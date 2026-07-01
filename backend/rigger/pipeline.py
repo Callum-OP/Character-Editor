@@ -491,9 +491,12 @@ def build_skeleton(obj, lm, fingers=False, standard=False, finger_tips_override=
 
     standard=True builds the "standard bone" SHAPE so the rig auto-recognises in
     figure-posing apps (used with bone_naming="standard"): exactly ONE shoulder
-    bone per side (= leftshoulder_bb_) instead of our Clavicle+Shoulder pair, and
-    no head-direction bone (it has no standard-bone equivalent). Everything else
-    maps 1:1 to the spec names in bone_naming.STANDARD_BB.
+    bone per side (= leftshoulder_bb_) instead of our Clavicle+Shoulder pair, plus
+    the spec's terminal *_end_bb_ tip bones on the head and toes and a forward
+    head-facing bone. A terminal bone needs a child for the app to derive its
+    length/orientation, so without the tips the head/toes read as unposeable
+    ("missing"). Everything else maps 1:1 to the spec names in
+    bone_naming.STANDARD_BB (overridable via bone_names.json).
     """
     log("skeleton", "assembling armature from landmarks"
                     + ("" if fingers else " (no fingers)")
@@ -535,15 +538,21 @@ def build_skeleton(obj, lm, fingers=False, standard=False, finger_tips_override=
     # One neck + a big head (neck lower & bigger; head ~70% of neck->crown).
     nh = neck_base + 0.30 * (lm["head_top_z"] - neck_base)
     head_h = lm["head_top_z"] - nh
+    top_z = lm["head_top_z"]
     neck = _bone(eb, "Neck", (0, by(neck_base), neck_base), (0, by(nh), nh), spine2, True)
-    head = _bone(eb, "Head", (0, by(nh), nh), (0, by(lm["head_top_z"]), lm["head_top_z"]), neck, True)
-    # Forward-pointing face joint (the head-facing-direction target some figure
-    # apps ask you to assign as part of the head region). Faces -Y (front).
-    if not standard:   # the standard-bone skeleton has no head-direction bone
-        face_z = nh + 0.5 * head_h
-        hfy = by(face_z)
-        _bone(eb, "HeadFace", (0, hfy, face_z), (0, hfy - 0.9 * head_h, face_z),
-              head, False)
+    head = _bone(eb, "Head", (0, by(nh), nh), (0, by(top_z), top_z), neck, True)
+    # Forward-pointing face joint (the head-facing-direction target figure apps
+    # ask you to assign for the head region). Faces -Y (front). Built for both
+    # schemes — the standard-bone app wants it too (maps to STANDARD_BB).
+    face_z = nh + 0.5 * head_h
+    hfy = by(face_z)
+    _bone(eb, "HeadFace", (0, hfy, face_z), (0, hfy - 0.9 * head_h, face_z),
+          head, False)
+    if standard:
+        # Head end/tip bone continuing up from the crown, so head_bb_ has a child
+        # and the app can derive its length/orientation (else the head is unposeable).
+        _bone(eb, "HeadEnd", (0, by(top_z), top_z),
+              (0, by(top_z), top_z + 0.35 * head_h), head, True)
 
     # Arms + legs, mirrored L/R. side sign: +X = left.
     for side, sign in (("L", 1), ("R", -1)):
@@ -607,9 +616,15 @@ def build_skeleton(obj, lm, fingers=False, standard=False, finger_tips_override=
         ft = _bone(eb, f"Foot_{side}",
                    (ax, ay, lm["ankle_z"]),
                    (ax, bally, 0.0), ll, True)
-        _bone(eb, f"Toe_{side}",
-              (ax, bally, 0.0),
-              (ax, toey, 0.0), ft, True)
+        toe = _bone(eb, f"Toe_{side}",
+                    (ax, bally, 0.0),
+                    (ax, toey, 0.0), ft, True)
+        if standard:
+            # Toe end/tip bone so the toebase has a child and the app can pose the
+            # toe (same reason as the head tip above). Continues past the toe tip.
+            _bone(eb, f"ToeEnd_{side}",
+                  (ax, toey, 0.0),
+                  (ax, toey + 0.35 * (toey - bally), 0.0), toe, True)
 
     bpy.ops.object.mode_set(mode="OBJECT")
     log("skeleton", f"created {len(arm.bones)} bones")

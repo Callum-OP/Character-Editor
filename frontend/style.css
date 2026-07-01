@@ -117,7 +117,7 @@ input[type="file"], select {
 input[type="range"] { width: 100%; accent-color: var(--accent); }
 .check { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; cursor: pointer; }
 
-button#run {
+button#run, button#export {
   background: var(--accent);
   color: #fff;
   border: none;
@@ -128,8 +128,16 @@ button#run {
   cursor: pointer;
   transition: filter .15s, opacity .15s;
 }
-button#run:hover:not(:disabled) { filter: brightness(1.1); }
-button#run:disabled { opacity: .45; cursor: not-allowed; }
+button#run:hover:not(:disabled), button#export:hover:not(:disabled) { filter: brightness(1.1); }
+button#run:disabled, button#export:disabled { opacity: .45; cursor: not-allowed; }
+
+details.grp { border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; background: var(--panel2); }
+details.grp > summary { font-weight: 700; cursor: pointer; padding: 6px 0; list-style: none; font-size: 13px; }
+details.grp > summary::-webkit-details-marker { display: none; }
+details.grp > summary::before { content: "▸ "; color: var(--muted); }
+details.grp[open] > summary::before { content: "▾ "; }
+details.grp[open] { padding-bottom: 10px; }
+details.grp .field { margin-top: 8px; }
 
 .status { font-size: 12px; min-height: 16px; color: var(--muted); }
 .status.err { color: var(--danger); }

@@ -17,8 +17,8 @@ Schemes
               names). When the FBX bones carry these EXACT names and the right
               axes, such apps auto-recognise the skeleton on import — no manual
               bone mapping. Used together with build_skeleton(standard=True),
-              which builds the matching skeleton shape (one shoulder bone, no
-              head-direction bone).
+              which builds the matching skeleton shape (one shoulder bone, plus
+              the head/toe *_end_bb_ tip bones and a head-facing bone).
 - "internal": keep our own readable names (handy for debugging the preview).
 """
 
@@ -64,8 +64,11 @@ for _side, _prefix in (("L", "Left"), ("R", "Right")):
 # figure-posing app auto-recognises). Read verbatim from that app's reference
 # guide model, so they are exact. Assumes the matching skeleton shape from
 # build_skeleton(standard=True): one shoulder bone per side (no separate
-# Shoulder), no head-direction bone. End/tip bones and 4th finger joints are
-# part of the spec but not emitted yet.
+# Shoulder), plus the head/toe *_end_bb_ tip bones and a head-facing bone.
+# The 4th finger joint (fingertip end) is part of the spec but not emitted yet.
+#
+# The head-facing bone name (headtarget_bb_) is a best-guess following the
+# app's convention — if it isn't auto-recognised, override it via bone_names.json.
 STANDARD_BB = {
     "Hips": "hips_bb_",
     "Spine": "spine_bb_",
@@ -73,6 +76,8 @@ STANDARD_BB = {
     "Spine2": "spine2_bb_",
     "Neck": "neck_bb_",
     "Head": "head_bb_",
+    "HeadEnd": "head_end_bb_",
+    "HeadFace": "headtarget_bb_",
     "Clavicle_L": "leftshoulder_bb_",
     "UpperArm_L": "leftarm_bb_",
     "LowerArm_L": "leftforearm_bb_",
@@ -85,10 +90,12 @@ STANDARD_BB = {
     "LowerLeg_L": "leftleg_bb_",
     "Foot_L": "leftfoot_bb_",
     "Toe_L": "lefttoebase_bb_",
+    "ToeEnd_L": "lefttoebase_end_bb_",
     "UpperLeg_R": "rightupleg_bb_",
     "LowerLeg_R": "rightleg_bb_",
     "Foot_R": "rightfoot_bb_",
     "Toe_R": "righttoebase_bb_",
+    "ToeEnd_R": "righttoebase_end_bb_",
 }
 
 # Fingers: {Finger}{n}_{L|R} -> {left|right}hand{finger}{n}_bb_ (n = 1..3; the
