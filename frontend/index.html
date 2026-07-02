@@ -66,6 +66,14 @@
         <span class="go muted">Planned</span>
       </div>
     </section>
+
+    <section class="hub-projects">
+      <h2>Your projects</h2>
+      <p class="sub">A project carries one model between tools — each tool saves its
+        result as the project's current model, and the next tool can pick it up.
+        Pick one to make it active, or start a new one.</p>
+      <div id="projGallery" class="proj-gallery"></div>
+    </section>
   </main>
 
   <script type="module">
@@ -75,6 +83,56 @@
       if (e.name) { el.textContent = "Engine ready: " + e.name; el.className = "engine ok"; }
       else { el.innerHTML = "No engine found — install <b>Blender</b> (set BLENDER_PATH)."; el.className = "engine bad"; }
     } catch { el.textContent = "Backend not reachable."; el.className = "engine bad"; }
+
+    // ---- saved projects gallery (uses window.Project from shell.js) ----------
+    const gallery = document.getElementById("projGallery");
+    const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    const ago = (t) => {
+      const d = Math.max(0, Date.now() / 1000 - t);
+      if (d < 90) return "just now";
+      if (d < 3600) return Math.round(d / 60) + " min ago";
+      if (d < 86400) return Math.round(d / 3600) + " h ago";
+      return Math.round(d / 86400) + " d ago";
+    };
+    async function render() {
+      const list = await (window.Project ? Project.list() : fetch("/api/project").then((r) => r.json()).catch(() => []));
+      const active = window.Project ? Project.id() : null;
+      let html = "";
+      list.forEach((p) => {
+        html += `<div class="proj-card${p.id === active ? " active" : ""}" data-open="${p.id}">
+          <button class="pc-del" data-del="${p.id}" title="Delete" type="button">✕</button>
+          <span class="pc-name">${esc(p.name)}</span>
+          <span class="pc-sub">${p.current ? esc(p.current) + (p.currentTool ? " · " + esc(p.currentTool) : "") : "empty"}</span>
+          <span class="pc-meta">${p.assetCount} asset(s) · updated ${ago(p.updated)}</span>
+          <button class="pc-up" data-up="${p.id}" type="button">⬆ Upload model</button>
+        </div>`;
+      });
+      html += `<div class="proj-card" id="pcNew" style="align-items:center;justify-content:center;text-align:center;color:var(--muted)">
+        <span style="font-size:22px;color:var(--accent)">＋</span><span class="pc-sub">New project</span></div>`;
+      gallery.innerHTML = html;
+
+      gallery.querySelectorAll("[data-open]").forEach((c) => c.addEventListener("click", async (ev) => {
+        if (ev.target.hasAttribute("data-del") || ev.target.hasAttribute("data-up")) return;
+        if (window.Project) await Project.setActive(c.getAttribute("data-open"));
+        render();
+      }));
+      gallery.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        if (confirm("Delete this project and its saved models?") && window.Project) { await Project.del(b.getAttribute("data-del")); render(); }
+      }));
+      gallery.querySelectorAll("[data-up]").forEach((b) => b.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        if (window.Project) { await Project.pickAndUpload(b.getAttribute("data-up")); render(); }
+      }));
+      const pcNew = document.getElementById("pcNew");
+      if (pcNew) pcNew.addEventListener("click", async () => {
+        const name = prompt("New project name:", "Project");
+        if (name !== null && window.Project) { await Project.create(name || "Untitled project"); render(); }
+      });
+    }
+    render();
+    window.addEventListener("project:change", render);
   </script>
 </body>
 </html>

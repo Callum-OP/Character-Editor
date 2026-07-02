@@ -32,6 +32,7 @@
         <input type="file" id="body" accept=".obj,.glb,.gltf,.fbx,.ply,.stl" />
         <small>The garment drapes &amp; collides on this. Empty = built-in mannequin. Not exported.</small>
       </label>
+      <button type="button" data-project-use class="hidden">Use current project model as body</button>
       <div class="field row">
         <label class="check"><input type="checkbox" id="showBody" checked /> Show body</label>
         <label class="check"><input type="checkbox" id="floor" /> Floor</label>
@@ -180,7 +181,7 @@
   </aside>
 
   <main id="stage">
-    <div id="hint">Pick a garment and press <b>Drape</b> to let it settle.</div>
+    <div id="hint"><p>Pick a garment and press <b>Drape</b> under simulate to let it settle.</p></div>
     <canvas id="view"></canvas>
   </main>
   </div>

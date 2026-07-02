@@ -158,6 +158,13 @@ el("srcFile").addEventListener("change", async () => {
   if (srcFile) { try { await viewer.setModelFromFile("source", srcFile, COLORS.source); viewer.setActive("source"); activeSeg("source"); el("hint").classList.add("hidden"); } catch {} }
   if (refFile && srcFile) prepare();
 });
+// carry a model in from the active project as "your model" to reshape
+window.addEventListener("project:use-model", async (e) => {
+  srcFile = e.detail.file;
+  try { await viewer.setModelFromFile("source", srcFile, COLORS.source); viewer.setActive("source"); activeSeg("source"); el("hint").classList.add("hidden"); } catch {}
+  if (refFile && srcFile) prepare();
+  else setStatus("Loaded your model from the project — add a reference to match.", "");
+});
 
 // ---- landmark controls ------------------------------------------------------
 el("markerMode").addEventListener("click", () => {
@@ -244,6 +251,7 @@ el("run").addEventListener("click", async () => {
     d.href = data.download_url; d.setAttribute("download", data.download_name);
     d.textContent = "Download " + data.download_name; d.classList.remove("hidden");
     setStatus("Done.", "ok");
+    if (window.Project) Project.saveResult({ url: data.download_url, name: data.download_name, tool: "Wrap" });
   } catch (e) { setStatus("Failed: " + e.message, "err"); }
   finally { el("run").disabled = false; }
 });

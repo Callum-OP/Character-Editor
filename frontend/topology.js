@@ -50,8 +50,8 @@ const setStatus = (msg, cls) => { statusEl.textContent = msg; statusEl.className
 const fmt = (n) => (n == null ? "?" : n.toLocaleString());
 
 let currentFile = null;
-fileInput.addEventListener("change", async () => {
-  currentFile = fileInput.files[0] || null;
+async function loadInput(file) {
+  currentFile = file || null;
   statsEl.classList.add("hidden"); dlEl.classList.add("hidden");
   if (!currentFile) { runBtn.disabled = true; return; }
   setStatus("Loading preview…", "busy");
@@ -61,7 +61,9 @@ fileInput.addEventListener("change", async () => {
     hint.classList.add("hidden");
     runBtn.disabled = false; setStatus("Ready. Click Retopologize.", "");
   } catch (err) { setStatus("Preview failed: " + err.message, "err"); runBtn.disabled = false; }
-});
+}
+fileInput.addEventListener("change", () => loadInput(fileInput.files[0] || null));
+window.addEventListener("project:use-model", (e) => loadInput(e.detail.file));
 
 runBtn.addEventListener("click", async () => {
   if (!currentFile) return;
@@ -85,6 +87,7 @@ runBtn.addEventListener("click", async () => {
     dlEl.href = data.download_url; dlEl.setAttribute("download", data.download_name);
     dlEl.textContent = "Download " + data.download_name; dlEl.classList.remove("hidden");
     setStatus("Done.", "ok");
+    if (window.Project) Project.saveResult({ url: data.download_url, name: data.download_name, tool: "Topology" });
   } catch (err) { setStatus("Failed: " + err.message, "err"); }
   finally { runBtn.disabled = false; }
 });

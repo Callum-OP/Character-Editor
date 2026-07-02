@@ -87,6 +87,15 @@ $("body").addEventListener("change", async () => {
     status("Body loaded.", "ok");
   } catch (e) { status("Body failed: " + e.message, "err"); }
 });
+// carry a model in from the active project as the collision body
+window.addEventListener("project:use-model", async (e) => {
+  status("Loading body from project…", "busy");
+  try {
+    const { surface } = await geometryFromFile(e.detail.file);
+    setBody(fitBody(surface), { isMannequin: false });
+    status("Body loaded from project.", "ok");
+  } catch (err) { status("Body failed: " + err.message, "err"); }
+});
 $("showBody").addEventListener("change", (e) => { if (bodyMesh) bodyMesh.visible = e.target.checked; });
 $("floor").addEventListener("change", () => { if (sim) sim.setParam("floor", $("floor").checked ? bodyBox.min.y : null); });
 
@@ -382,6 +391,7 @@ $("export").addEventListener("click", async () => {
     const root = exportRoot();
     const glb = await new Promise((res, rej) => new GLTFExporter().parse(root, res, rej, { binary: true }));
     const glbBlob = new Blob([glb], { type: "model/gltf-binary" });
+    if (window.Project) Project.saveResult({ blob: glbBlob, name: "garment.glb", tool: "Cloth" });
     if (fmt === "glb") { triggerBlob(glbBlob, "garment.glb"); status("Saved garment.glb", "ok"); return; }
     if (fmt === "obj") {
       triggerBlob(new Blob([new OBJExporter().parse(root)], { type: "text/plain" }), "garment.obj");

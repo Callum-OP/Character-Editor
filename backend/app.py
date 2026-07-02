@@ -36,6 +36,19 @@ SUPPORTED_OUT = {".obj", ".glb", ".gltf", ".fbx", ".ply", ".stl"}
 app = FastAPI(title="Character Editor")
 
 
+@app.middleware("http")
+async def always_revalidate(request: Request, call_next):
+    """Static assets (JS/HTML/CSS) are served with only ETag/Last-Modified, so
+    browsers fall back to *heuristic* caching and can serve a stale script for
+    hours without asking the server — e.g. an old tool page missing a newly
+    added event listener. Forcing `no-cache` keeps revalidation cheap (304s via
+    the ETag) while guaranteeing the browser never runs stale frontend code."""
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 @app.get("/api/engine")
 def engine():
     return retopo.detect_engine()
@@ -404,6 +417,151 @@ def rig_download(tok: str):
     if not path or not os.path.isfile(path):
         raise HTTPException(404, "not found")
     return FileResponse(path, filename="rigged" + os.path.splitext(path)[1].lower())
+
+
+# --------------------------------------------------------------------------- #
+# Projects: persistent per-user workspaces that carry a model between tools.
+# Each project is a folder under work/projects/<id> with a manifest.json and the
+# copied-in asset files. Every tool can append its result as the new "current"
+# model, and pull the current model as its input — so retopo -> wrap -> rig ->
+# face -> cloth flows as one workspace instead of manual export/re-import.
+# --------------------------------------------------------------------------- #
+PROJECTS = os.path.join(WORK, "projects")
+os.makedirs(PROJECTS, exist_ok=True)
+
+
+def _safe_id(v):
+    """Project/asset ids are our own hex tokens; reject anything else so the id
+    can't escape the projects directory."""
+    if not v or not v.isalnum():
+        raise HTTPException(400, "bad id")
+    return v
+
+
+def _proj_dir(pid):
+    return os.path.join(PROJECTS, _safe_id(pid))
+
+
+def _load_manifest(pid):
+    p = os.path.join(_proj_dir(pid), "manifest.json")
+    if not os.path.isfile(p):
+        return None
+    with open(p, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _save_manifest(m):
+    m["updated"] = int(time.time())
+    with open(os.path.join(_proj_dir(m["id"]), "manifest.json"), "w", encoding="utf-8") as f:
+        json.dump(m, f, indent=2)
+    return m
+
+
+def _asset(m, aid):
+    return next((a for a in m["assets"] if a["id"] == aid), None)
+
+
+@app.post("/api/project")
+async def project_create(request: Request):
+    body = json.loads((await request.body()).decode("utf-8") or "{}")
+    pid = uuid.uuid4().hex[:12]
+    os.makedirs(_proj_dir(pid), exist_ok=True)
+    now = int(time.time())
+    m = {"id": pid, "name": (body.get("name") or "Untitled project").strip()[:80] or "Untitled project",
+         "created": now, "updated": now, "current": None, "assets": []}
+    return JSONResponse(_save_manifest(m))
+
+
+@app.get("/api/project")
+def project_list():
+    out = []
+    for pid in (os.listdir(PROJECTS) if os.path.isdir(PROJECTS) else []):
+        try:
+            m = _load_manifest(pid)
+        except HTTPException:
+            continue
+        if not m:
+            continue
+        cur = _asset(m, m.get("current"))
+        out.append({"id": m["id"], "name": m["name"], "updated": m["updated"],
+                    "created": m["created"], "assetCount": len(m["assets"]),
+                    "current": cur["name"] if cur else None,
+                    "currentTool": cur["tool"] if cur else None})
+    out.sort(key=lambda x: x["updated"], reverse=True)
+    return out
+
+
+@app.get("/api/project/{pid}")
+def project_get(pid: str):
+    m = _load_manifest(pid)
+    if not m:
+        raise HTTPException(404, "no such project")
+    return m
+
+
+@app.patch("/api/project/{pid}")
+async def project_update(pid: str, request: Request):
+    m = _load_manifest(pid)
+    if not m:
+        raise HTTPException(404, "no such project")
+    body = json.loads((await request.body()).decode("utf-8") or "{}")
+    if body.get("name"):
+        m["name"] = body["name"].strip()[:80] or m["name"]
+    if "current" in body and (body["current"] is None or _asset(m, body["current"])):
+        m["current"] = body["current"]
+    return JSONResponse(_save_manifest(m))
+
+
+@app.delete("/api/project/{pid}")
+def project_delete(pid: str):
+    d = _proj_dir(pid)
+    if os.path.isdir(d):
+        shutil.rmtree(d, ignore_errors=True)
+    return {"ok": True}
+
+
+@app.post("/api/project/{pid}/assets")
+async def project_add_asset(pid: str, file: UploadFile = File(...),
+                            tool: str = Form("Tool"), name: str = Form(None)):
+    m = _load_manifest(pid)
+    if not m:
+        raise HTTPException(404, "no such project")
+    orig = os.path.basename(name or file.filename or "model.glb")
+    ext = os.path.splitext(orig)[1].lower() or ".glb"
+    if ext not in SUPPORTED_IN:
+        raise HTTPException(400, f"unsupported asset format '{ext}'")
+    aid = uuid.uuid4().hex[:10]
+    fname = aid + ext
+    with open(os.path.join(_proj_dir(pid), fname), "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    asset = {"id": aid, "tool": tool[:40], "name": orig[:80],
+             "format": ext.lstrip("."), "file": fname, "created": int(time.time())}
+    m["assets"].append(asset)
+    m["current"] = aid
+    _save_manifest(m)
+    return JSONResponse({"project": m, "asset": asset})
+
+
+@app.get("/api/project/{pid}/current")
+def project_current(pid: str):
+    m = _load_manifest(pid)
+    if not m or not m.get("current"):
+        raise HTTPException(404, "no current model")
+    a = _asset(m, m["current"])
+    path = os.path.join(_proj_dir(pid), a["file"]) if a else None
+    if not path or not os.path.isfile(path):
+        raise HTTPException(404, "missing file")
+    return FileResponse(path, filename=a["name"])
+
+
+@app.get("/api/project/{pid}/assets/{aid}")
+def project_asset(pid: str, aid: str):
+    m = _load_manifest(pid)
+    a = _asset(m, _safe_id(aid)) if m else None
+    path = os.path.join(_proj_dir(pid), a["file"]) if a else None
+    if not path or not os.path.isfile(path):
+        raise HTTPException(404, "not found")
+    return FileResponse(path, filename=a["name"])
 
 
 # Serve the frontend (mounted last so /api/* wins).

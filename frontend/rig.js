@@ -178,6 +178,8 @@ dropzone.addEventListener("drop", (e) => {
 });
 browseBtn.addEventListener("click", () => fileInput.click());
 fileInput.addEventListener("change", () => { if (fileInput.files[0]) acceptFile(fileInput.files[0]); });
+// carry a model in from the active project
+window.addEventListener("project:use-model", (e) => acceptFile(e.detail.file));
 
 function acceptFile(file) {
   const ext = file.name.split(".").pop().toLowerCase();
@@ -579,6 +581,14 @@ async function startRig() {
     addLog("ready",
       inputType === "head" ? "Face shapes built — loaded in preview"
                            : "Rigged model loaded in preview", "ok");
+    if (window.Project) {
+      const base = selectedFile && selectedFile.name ? selectedFile.name.replace(/\.[^.]+$/, "") : "figure";
+      Project.saveResult({
+        url: glbDownload,
+        name: base + (inputType === "head" ? "_face.glb" : "_rigged.glb"),
+        tool: inputType === "head" ? "Face (head)" : "Rig",
+      });
+    }
   } catch (err) {
     addLog("ERROR", String(err.message || err), "error");
   } finally {

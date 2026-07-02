@@ -501,6 +501,104 @@ footer p { margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: w
 @keyframes toast-in { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
 @keyframes toast-out { to { opacity: 0; transform: translateX(20px); } }
 
+/* ==========================================================================
+   Project workspace — app-bar chip + dropdown, "use model" button, hub gallery
+   ========================================================================== */
+.faint { color: var(--faint); }
+
+.proj { position: relative; flex: 0 0 auto; }
+.proj-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  max-width: 320px;
+  padding: 7px 12px; border-radius: 999px;
+  background: var(--glass-2); border: 1px solid var(--brd); color: var(--fg);
+  font: inherit; font-size: 12.5px; cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.proj-btn:hover { border-color: var(--brd-2); background: var(--glass-3); }
+.proj.has .proj-btn { border-color: var(--brd-2); }
+.proj-ic { color: var(--accent); font-size: 12px; }
+.proj.has .proj-ic { color: var(--accent-2); }
+.proj-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proj-txt b { font-weight: 700; }
+.proj-cur { color: var(--muted); }
+.proj-caret { color: var(--muted); font-size: 10px; }
+
+.proj-menu {
+  position: absolute; top: 46px; right: 0; z-index: 60;
+  width: 300px; max-height: 70vh; overflow-y: auto;
+  padding: 8px; border-radius: 14px;
+  background: rgba(16, 20, 34, 0.96); backdrop-filter: blur(18px);
+  border: 1px solid var(--brd-2); box-shadow: var(--shadow);
+}
+.proj-menu-hd { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); padding: 4px 8px 6px; font-weight: 700; }
+.proj-empty { color: var(--muted); font-size: 12px; padding: 8px; line-height: 1.5; }
+.proj-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 9px; border-radius: 9px; cursor: pointer;
+  border: 1px solid transparent;
+}
+.proj-item:hover { background: var(--glass-2); }
+.proj-item.active { background: var(--grad-soft); border-color: var(--brd-2); }
+.proj-item-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.proj-item-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proj-item-sub { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proj-del {
+  flex: 0 0 auto; width: 24px; height: 24px; border-radius: 7px;
+  background: transparent; border: 1px solid transparent; color: var(--muted);
+  cursor: pointer; font-size: 12px; line-height: 1;
+}
+.proj-del:hover { color: var(--danger); border-color: rgba(255,107,129,.4); background: rgba(255,107,129,.08); }
+.proj-menu-actions { display: flex; gap: 6px; padding: 8px 4px 2px; margin-top: 4px; border-top: 1px solid var(--brd); }
+.proj-menu-actions .seg { flex: 1; }
+
+/* "Use current project model" button in each tool's upload area */
+[data-project-use] {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  width: 100%; padding: 9px 12px; border-radius: var(--radius-sm);
+  background: var(--grad-soft); border: 1px solid var(--brd-2); color: var(--fg);
+  font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  transition: filter .15s, border-color .15s;
+}
+[data-project-use]::before { content: "◆"; color: var(--accent-2); font-size: 11px; }
+[data-project-use]:hover { filter: brightness(1.12); border-color: var(--accent); }
+
+/* Hub — saved projects gallery */
+.hub-projects { max-width: 1040px; margin: 40px auto 0; }
+.hub-projects h2 { font-size: 18px; margin: 0 0 4px; font-weight: 700; }
+.hub-projects .sub { margin: 0 0 16px; }
+.proj-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.proj-card {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 16px; border-radius: var(--radius); cursor: pointer;
+  background: var(--glass); border: 1px solid var(--brd);
+  transition: transform .15s, border-color .15s, background .15s;
+  position: relative;
+}
+.proj-card:hover { transform: translateY(-3px); border-color: var(--brd-2); background: var(--glass-2); }
+.proj-card.active { border-color: var(--accent); box-shadow: var(--glow); }
+.proj-card .pc-name { font-size: 15px; font-weight: 700; }
+.proj-card .pc-sub { font-size: 12px; color: var(--muted); }
+.proj-card .pc-meta { font-size: 11px; color: var(--faint); margin-top: 6px; }
+.proj-card .pc-del {
+  position: absolute; top: 10px; right: 10px; width: 26px; height: 26px; border-radius: 8px;
+  background: rgba(0,0,0,.25); border: 1px solid var(--brd); color: var(--muted);
+  cursor: pointer; font-size: 12px; opacity: 0; transition: opacity .15s;
+}
+.proj-card:hover .pc-del { opacity: 1; }
+.proj-card .pc-del:hover { color: var(--danger); border-color: rgba(255,107,129,.4); }
+.proj-card .pc-up {
+  margin-top: 10px; align-self: flex-start; padding: 6px 12px; border-radius: 9px;
+  background: var(--glass-2); border: 1px solid var(--brd); color: var(--muted);
+  cursor: pointer; font-size: 12px; transition: color .15s, border-color .15s, background .15s;
+}
+.proj-card .pc-up:hover { color: var(--fg); border-color: var(--accent); background: var(--glass); }
+.proj-empty-hub { color: var(--muted); font-size: 13px; padding: 18px; border: 1px dashed var(--brd); border-radius: var(--radius); }
+
+@media (max-width: 720px) {
+  .proj-btn { max-width: 150px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
 }

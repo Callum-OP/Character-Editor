@@ -106,6 +106,12 @@ el("file").addEventListener("change", () => {
   el("run").disabled = !file;
   if (file) setStatus("Ready. Generate expressions.", "");
 });
+// carry a head model in from the active project
+window.addEventListener("project:use-model", (e) => {
+  file = e.detail.file;
+  el("run").disabled = false;
+  setStatus("Loaded from project. Generate expressions.", "");
+});
 
 el("run").addEventListener("click", async () => {
   if (!file) return;
@@ -133,6 +139,10 @@ el("run").addEventListener("click", async () => {
     buildExprUI();
     el("exprPanel").classList.remove("hidden");
     setStatus(`Done — ${morphNames.length} shape keys. Pick an expression.`, "ok");
+    if (window.Project) {
+      const base = file && file.name ? file.name.replace(/\.[^.]+$/, "") : "head";
+      Project.saveResult({ url: glbUrl, name: base + "_face.glb", tool: "Face" });
+    }
   } catch (e) { setStatus("Failed: " + e.message, "err"); }
   finally { el("run").disabled = false; }
 });
