@@ -15,6 +15,7 @@
     { href: "/rig.html",      ic: "⚹", lbl: "Rigger" },
     { href: "/face.html",     ic: "☺", lbl: "Face" },
     { href: "/cloth.html",    ic: "〜", lbl: "Cloth" },
+    { href: "/paint.html",    ic: "▧", lbl: "Paint" },
   ];
   var LS_KEY = "ce.activeProject";
 

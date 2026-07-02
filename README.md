@@ -15,6 +15,12 @@ is a hub linking to individual tools; it's built to grow.
 4. **Face Expressions** (`/face.html`) — generate the 52 ARKit facial shape keys
    for a head model, then apply expressions (smile, surprise, blink…) live and
    download the shape-keyed model.
+5. **Paint Studio** (`/paint.html`) — paint textures directly onto a model in the
+   browser. A layered studio (blend modes, per-layer opacity/visibility) with an
+   advanced brush set — paint, airbrush, eraser, soft **smudge** & **blur**,
+   bucket fill and eyedropper — plus **mirror symmetry** so one stroke paints
+   both sides. Runs entirely client-side (Three.js); export the texture as PNG or
+   the whole painted model as GLB, or save it back to the project. No backend.
 
 ## How it works
 
