@@ -23,7 +23,7 @@ const canvas = document.getElementById("view");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x14161a);
+scene.background = new THREE.Color(0x0b0e18);
 const camera = new THREE.PerspectiveCamera(35, 1, 0.001, 100);
 camera.position.set(0, 0.1, 1.2);
 const controls = new OrbitControls(camera, canvas);
@@ -31,6 +31,8 @@ controls.enableDamping = true;
 scene.add(new THREE.HemisphereLight(0xffffff, 0x404050, 1.2));
 const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(2, 3, 4); scene.add(key);
 const rim = new THREE.DirectionalLight(0x88aaff, 0.6); rim.position.set(-3, 1, -2); scene.add(rim);
+const grid = new THREE.GridHelper(1.6, 24, 0x2c3556, 0x1a2038);
+grid.position.y = -0.32; scene.add(grid);
 
 let root = null;                  // loaded model root
 let morphMeshes = [];             // meshes that carry the ARKit morphs
@@ -68,6 +70,8 @@ async function loadGLB(url) {
   });
   scene.add(root);
   frame(root);
+  const hint = el("hint");
+  if (hint) hint.classList.add("hidden");   // model is showing — clear the overlay
 }
 
 // set one morph by name across all meshes that have it
@@ -85,7 +89,8 @@ function setWeights(weights) {
 const el = (id) => document.getElementById(id);
 const setStatus = (m, c) => { const s = el("status"); s.textContent = m; s.className = "status " + (c || ""); };
 let current = {};   // current weights
-let file = null, downloadUrl = null;
+let file = null;
+let glbUrl = null, glbDownload = null, fbxDownload = null;   // result URLs
 
 async function checkEngine() {
   const e0 = el("engine");
@@ -122,10 +127,11 @@ el("run").addEventListener("click", async () => {
     })).json();
     if (build.error) throw new Error(build.error);
     await loadGLB(build.glbUrl);
-    downloadUrl = build.glbDownload;
+    glbUrl = build.glbUrl;
+    glbDownload = build.glbDownload;
+    fbxDownload = build.fbxDownload || null;
     buildExprUI();
     el("exprPanel").classList.remove("hidden");
-    const d = el("download"); d.href = downloadUrl; d.classList.remove("hidden");
     setStatus(`Done — ${morphNames.length} shape keys. Pick an expression.`, "ok");
   } catch (e) { setStatus("Failed: " + e.message, "err"); }
   finally { el("run").disabled = false; }
@@ -162,6 +168,34 @@ function applyPreset(name) {
   for (const sl of el("sliders").querySelectorAll("input[type=range]"))
     sl.value = current[sl.dataset.name] || 0;
 }
+
+// ---- export in the chosen format -------------------------------------------
+// GLB/FBX come straight from the rig build; glTF/OBJ/PLY/STL are transcoded from
+// the GLB by the Blender convert endpoint (shared with Cloth Studio).
+el("download").addEventListener("click", async () => {
+  if (!glbUrl) return;
+  const fmt = el("outFormat").value;
+  const btn = el("download");
+  if (fmt === "glb") return void (window.location.href = glbDownload);
+  if (fmt === "fbx" && fbxDownload) return void (window.location.href = fbxDownload);
+  btn.disabled = true;
+  setStatus(`Converting to ${fmt.toUpperCase()}…`, "busy");
+  try {
+    const glb = await (await fetch(glbUrl)).blob();
+    const fd = new FormData();
+    fd.append("file", new File([glb], "face.glb", { type: "model/gltf-binary" }));
+    fd.append("out_format", fmt);
+    const res = await fetch("/api/cloth/convert", { method: "POST", body: fd });
+    const data = await res.json();
+    if (!res.ok || !data.download_url) throw new Error(data.detail || "conversion failed");
+    window.location.href = data.download_url;
+    setStatus(`Exported ${fmt.toUpperCase()}.`, "ok");
+  } catch (e) {
+    setStatus("Export failed: " + e.message, "err");
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 el("resetExpr").addEventListener("click", () => { el("preset").value = "Neutral"; applyPreset("Neutral"); });
 el("wire").addEventListener("change", (e) => {

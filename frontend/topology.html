@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Auto Quad Topology — Character Editor</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="/shell.js" defer></script>
   <script type="importmap">
   {
     "imports": {
@@ -14,9 +15,9 @@
   }
   </script>
 </head>
-<body>
+<body class="tool">
+  <div class="workspace">
   <aside id="panel">
-    <a class="hubnav" href="/">&larr; Character Editor</a>
     <h1>Auto Quad<br/>Topology</h1>
     <p class="sub">Upload a 3D model &rarr; get clean quad/tri topology.</p>
 
@@ -97,6 +98,7 @@
     <div id="hint">Load a model to begin.</div>
     <canvas id="view"></canvas>
   </main>
+  </div>
 
   <script type="module" src="topology.js"></script>
 </body>

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Cloth Studio — Character Editor</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="/shell.js" defer></script>
   <script type="importmap">
   {
     "imports": {
@@ -14,9 +15,9 @@
   }
   </script>
 </head>
-<body>
+<body class="tool">
+  <div class="workspace">
   <aside id="panel">
-    <a class="hubnav" href="/">&larr; Character Editor</a>
     <h1>Cloth<br/>Studio</h1>
     <p class="sub">Physics-based cloth draping: pick a preset pattern <em>or drop
       in your own garment mesh</em>, put it on a body (built-in or your own posed
@@ -182,6 +183,7 @@
     <div id="hint">Pick a garment and press <b>Drape</b> to let it settle.</div>
     <canvas id="view"></canvas>
   </main>
+  </div>
 
   <script type="module" src="cloth.js"></script>
 </body>

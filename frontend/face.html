@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Face Expressions — Character Editor</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="/shell.js" defer></script>
   <script type="importmap">
   {
     "imports": {
@@ -14,9 +15,9 @@
   }
   </script>
 </head>
-<body>
+<body class="tool">
+  <div class="workspace">
   <aside id="panel">
-    <a class="hubnav" href="/">&larr; Character Editor</a>
     <h1>Face<br/>Expressions</h1>
     <p class="sub">Generate ARKit-52 facial shape keys for a head model, then
       apply expressions live.</p>
@@ -41,7 +42,21 @@
         <span>Fine-tune shapes <small id="skCount"></small></span>
         <div id="sliders" class="sliders"></div>
       </div>
-      <a id="download" class="download hidden" download>Download model + shape keys</a>
+
+      <label class="field">
+        <span>Export format</span>
+        <select id="outFormat">
+          <option value="glb" selected>GLB (keeps shape keys)</option>
+          <option value="gltf">glTF (keeps shape keys)</option>
+          <option value="fbx">FBX (keeps shape keys)</option>
+          <option value="obj">OBJ (base mesh only)</option>
+          <option value="ply">PLY (base mesh only)</option>
+          <option value="stl">STL (base mesh only)</option>
+        </select>
+        <small>GLB / glTF / FBX keep all 52 shape keys. OBJ / PLY / STL can't
+          store blendshapes, so they export the base (neutral) mesh only.</small>
+      </label>
+      <button id="download" class="download">Download model</button>
     </div>
 
     <footer>
@@ -56,6 +71,7 @@
     <div id="hint">Load a head model and generate its shape keys.</div>
     <canvas id="view"></canvas>
   </main>
+  </div>
 
   <script type="module" src="face.js"></script>
 </body>

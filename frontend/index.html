@@ -3,72 +3,76 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Character Editor</title>
+  <title>Character Editor — 3D character toolkit</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="/shell.js" defer></script>
 </head>
 <body class="hub">
-  <header class="hub-header">
-    <h1>Character Editor</h1>
-    <p>A toolkit for preparing 3D characters &amp; meshes — retopology, shape
-       matching, rigging and facial expressions. Pick a tool.</p>
-    <div id="hubEngine" class="engine">Detecting engine&hellip;</div>
-  </header>
+  <main class="hub-main">
+    <header class="hub-header">
+      <span class="eyebrow">◈ 3D Character Toolkit</span>
+      <h1>Character Editor</h1>
+      <p>Retopology, shape matching, auto-rigging, facial expressions and cloth
+         simulation, all the tools for getting 3D characters ready. Pick a tool to begin.</p>
+      <div id="hubEngine" class="engine">Detecting engine&hellip;</div>
+    </header>
 
-  <main class="hub-grid">
-    <a class="tool-card" href="/topology.html">
-      <div class="tool-icon">▦</div>
-      <h2>Auto Quad Topology</h2>
-      <p>Turn any model into clean quad / quad-dominant / triangle topology.
-         Optional hard mirror symmetry with a splittable center seam.</p>
-      <span class="go">Open tool →</span>
-    </a>
+    <section class="hub-grid">
+      <a class="tool-card" href="/topology.html">
+        <div class="tool-icon">▦</div>
+        <h2>Auto Quad Topology</h2>
+        <p>Turn any model into clean quad / quad-dominant / triangle topology.
+           Optional hard mirror symmetry with a splittable center seam.</p>
+        <span class="go">Open tool →</span>
+      </a>
 
-    <a class="tool-card" href="/wrap.html">
-      <div class="tool-icon">⊹</div>
-      <h2>Shape Match (Wrap)</h2>
-      <p>Conform your model's vertices to a reference shape without changing
-         your topology — keep your features and shape keys, match the target.</p>
-      <span class="go">Open tool →</span>
-    </a>
+      <a class="tool-card" href="/wrap.html">
+        <div class="tool-icon">‹›</div>
+        <h2>Shape Match (Wrap)</h2>
+        <p>Conform your model's vertices to a reference shape without changing
+           your topology — keep your features and shape keys, match the target.</p>
+        <span class="go">Open tool →</span>
+      </a>
 
-    <a class="tool-card" href="/rig.html">
-      <div class="tool-icon">⊿</div>
-      <h2>Character Rigger</h2>
-      <p>Auto-detect joints on a humanoid model, fine-tune the markers, then
-         build a skinned Mixamo-style skeleton (with fingers &amp; optional face).</p>
-      <span class="go">Open tool →</span>
-    </a>
+      <a class="tool-card" href="/rig.html">
+        <div class="tool-icon">⚹</div>
+        <h2>Character Rigger</h2>
+        <p>Auto-detect joints on a humanoid model, fine-tune the markers, then
+           build a skinned Mixamo-style skeleton (with fingers &amp; optional face).</p>
+        <span class="go">Open tool →</span>
+      </a>
 
-    <a class="tool-card" href="/face.html">
-      <div class="tool-icon">☺</div>
-      <h2>Face Expressions</h2>
-      <p>Generate ARKit-52 facial shape keys for a head model, then apply
-         expressions (smile, surprise, blink…) live and download the result.</p>
-      <span class="go">Open tool →</span>
-    </a>
+      <a class="tool-card" href="/face.html">
+        <div class="tool-icon">☺</div>
+        <h2>Face Expressions</h2>
+        <p>Generate ARKit-52 facial shape keys for a head model, then apply
+           expressions (smile, surprise, blink…) live and download the result.</p>
+        <span class="go">Open tool →</span>
+      </a>
 
-    <a class="tool-card" href="/cloth.html">
-      <div class="tool-icon">〜</div>
-      <h2>Cloth Studio</h2>
-      <p>Physics-based cloth draping: drop a t-shirt, shorts, skirt, dress,
-         cloak, cape or poncho on a body and let cloth physics settle it into real
-         folds &amp; wrinkles, then export the draped mesh.</p>
-      <span class="go">Open tool →</span>
-    </a>
+      <a class="tool-card" href="/cloth.html">
+        <div class="tool-icon">〜</div>
+        <h2>Cloth Studio</h2>
+        <p>Physics-based cloth draping: drop a t-shirt, shorts, skirt, dress,
+           cloak, cape or poncho on a body and let cloth physics settle it into real
+           folds &amp; wrinkles, then export the draped mesh.</p>
+        <span class="go">Open tool →</span>
+      </a>
 
-    <div class="tool-card disabled">
-      <div class="tool-icon">＋</div>
-      <h2>More coming</h2>
-      <p>This hub is built to grow — additional mesh tools will appear here.</p>
-      <span class="go muted">Planned</span>
-    </div>
+      <div class="tool-card disabled">
+        <div class="tool-icon">＋</div>
+        <h2>More coming</h2>
+        <p>This hub is built to grow — additional mesh tools will appear here.</p>
+        <span class="go muted">Planned</span>
+      </div>
+    </section>
   </main>
 
   <script type="module">
     const el = document.getElementById("hubEngine");
     try {
       const e = await (await fetch("/api/engine")).json();
-      if (e.name) { el.textContent = "Engine ready: " + e.name + " ✓"; el.className = "engine ok"; }
+      if (e.name) { el.textContent = "Engine ready: " + e.name; el.className = "engine ok"; }
       else { el.innerHTML = "No engine found — install <b>Blender</b> (set BLENDER_PATH)."; el.className = "engine bad"; }
     } catch { el.textContent = "Backend not reachable."; el.className = "engine bad"; }
   </script>

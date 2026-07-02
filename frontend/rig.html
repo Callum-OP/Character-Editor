@@ -4,34 +4,79 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Character Rigger — Character Editor</title>
+    <link rel="stylesheet" href="/style.css" />
     <link rel="stylesheet" href="/rig.css" />
+    <script src="/shell.js" defer></script>
     <script type="module" src="/vendor/model-viewer.min.js"></script>
   </head>
-  <body>
-    <header>
-      <a class="hubnav" href="/" style="color:#8a94a3;text-decoration:none;font-size:12px;font-weight:600;display:inline-block;margin:8px 0 0 18px">&larr; Character Editor</a>
-      <h1>Character&nbsp;Rigger <span class="tag">humanoid body rig + ARKit face shapes · runs in your browser</span></h1>
-    </header>
+  <body class="tool rig">
+    <div class="workspace">
+      <aside id="panel">
+        <h1>Character<br />Rigger</h1>
+        <p class="sub">Auto-detect joints on a humanoid model, fine-tune the
+          markers, then build a skinned skeleton (with fingers &amp; optional
+          ARKit face).</p>
 
-    <main>
-      <section id="dropzone" class="dropzone">
-        <div class="drop-inner">
-          <p class="drop-title">Drop a humanoid model here</p>
+        <div id="engine" class="engine">Detecting engine&hellip;</div>
+
+        <section id="dropzone" class="dropzone">
+          <p class="drop-title">Drop a model here</p>
           <p class="drop-sub">.glb · .gltf · .obj · .fbx</p>
           <input type="file" id="fileInput" accept=".glb,.gltf,.obj,.fbx" hidden />
-          <button id="browseBtn" class="btn">Browse…</button>
-          <p class="drop-or">or</p>
-          <button id="testBtn" class="btn btn-ghost">Rig a test figure</button>
+          <div class="drop-actions">
+            <button id="browseBtn" class="btn">Browse…</button>
+            <button id="testBtn" class="btn btn-ghost">Test figure</button>
+          </div>
           <div class="input-type" id="inputType">
             <span class="input-type-label">Input is a</span>
             <button class="btn input-type-btn active" id="typeBodyBtn" type="button">full body</button>
             <button class="btn input-type-btn" id="typeHeadBtn" type="button">head only</button>
           </div>
-          <p class="drop-sub" id="inputTypeHint">Body → skeleton + optional face shapes. Head only → ARKit face shapes, no skeleton.</p>
-        </div>
-      </section>
+          <p class="drop-sub" id="inputTypeHint">Body → skeleton + optional face
+            shapes. Head only → ARKit face shapes, no skeleton.</p>
+        </section>
 
-      <section class="stage">
+        <div class="file-row">
+          <span class="label">Input</span>
+          <span id="inputName" class="value">— none —</span>
+        </div>
+
+        <button id="rigBtn" class="btn btn-primary" disabled>Rig model</button>
+        <button id="buildBtn" class="btn btn-primary hidden">Build rig from markers</button>
+
+        <label class="opt-row hidden" id="fingersRow">
+          <input type="checkbox" id="fingersChk" checked />
+          Finger bones
+        </label>
+        <label class="opt-row hidden" id="stdBonesRow">
+          <input type="checkbox" id="stdBonesChk" />
+          Standard bones (auto-recognize)
+        </label>
+        <label class="opt-row hidden" id="faceRow">
+          <input type="checkbox" id="faceChk" />
+          Facial shape keys (ARKit&nbsp;52)
+        </label>
+
+        <div class="mode-row hidden" id="modeRow">
+          <button class="btn mode-btn active" id="bodyModeBtn" type="button">Body joints</button>
+          <button class="btn mode-btn hidden" id="faceModeBtn" type="button">Face</button>
+          <button class="btn mode-btn hidden" id="handsModeBtn" type="button">Hands</button>
+        </div>
+        <div class="mode-row hidden" id="handSideRow">
+          <button class="btn mode-btn active" id="handLBtn" type="button">Left hand</button>
+          <button class="btn mode-btn" id="handRBtn" type="button">Right hand</button>
+        </div>
+
+        <button id="resetBtn" class="btn hidden">↺ Reset markers</button>
+        <button id="backBtn" class="btn hidden">← Back</button>
+        <button id="saveFbxBtn" class="btn btn-accent" disabled>Download .fbx</button>
+        <button id="saveBtn" class="btn" disabled>Download .glb</button>
+
+        <div class="log-header">Status</div>
+        <ol id="log" class="log"></ol>
+      </aside>
+
+      <main id="stage">
         <div class="viewer-wrap">
           <model-viewer
             id="viewer"
@@ -42,7 +87,7 @@
             environment-image="neutral"
           ></model-viewer>
           <div id="viewerPlaceholder" class="viewer-placeholder">
-            The rigged result will appear here.
+            Drop a model or pick a test figure — the rigged result appears here.
           </div>
 
           <div id="editor" class="editor hidden">
@@ -68,46 +113,22 @@
             </p>
           </div>
         </div>
-
-        <aside class="panel">
-          <div class="file-row">
-            <span class="label">Input</span>
-            <span id="inputName" class="value">— none —</span>
-          </div>
-          <button id="rigBtn" class="btn btn-primary" disabled>Rig model</button>
-          <button id="buildBtn" class="btn btn-primary hidden">Build rig from markers</button>
-          <label class="opt-row hidden" id="fingersRow">
-            <input type="checkbox" id="fingersChk" checked />
-            Finger bones
-          </label>
-          <label class="opt-row hidden" id="stdBonesRow">
-            <input type="checkbox" id="stdBonesChk" />
-            Standard bones (auto-recognize)
-          </label>
-          <label class="opt-row hidden" id="faceRow">
-            <input type="checkbox" id="faceChk" />
-            Facial shape keys (ARKit&nbsp;52)
-          </label>
-          <div class="mode-row hidden" id="modeRow">
-            <button class="btn mode-btn active" id="bodyModeBtn" type="button">Body joints</button>
-            <button class="btn mode-btn hidden" id="faceModeBtn" type="button">Face</button>
-            <button class="btn mode-btn hidden" id="handsModeBtn" type="button">Hands</button>
-          </div>
-          <div class="mode-row hidden" id="handSideRow">
-            <button class="btn mode-btn active" id="handLBtn" type="button">Left hand</button>
-            <button class="btn mode-btn" id="handRBtn" type="button">Right hand</button>
-          </div>
-          <button id="resetBtn" class="btn hidden">↺ Reset markers</button>
-          <button id="backBtn" class="btn hidden">← Back</button>
-          <button id="saveFbxBtn" class="btn btn-accent" disabled>Download .fbx</button>
-          <button id="saveBtn" class="btn" disabled>Download .glb</button>
-
-          <div class="log-header">Status</div>
-          <ol id="log" class="log"></ol>
-        </aside>
-      </section>
-    </main>
+      </main>
+    </div>
 
     <script src="/rig.js"></script>
+    <script>
+      /* engine badge, mirroring the other tool pages */
+      (function () {
+        var e = document.getElementById("engine");
+        fetch("/api/rig/config")
+          .then(function (r) { return r.json(); })
+          .then(function (c) {
+            if (c && c.blender) { e.textContent = "Engine: Blender ✓"; e.className = "engine ok"; }
+            else { e.innerHTML = "Needs <b>Blender</b>. Set BLENDER_PATH."; e.className = "engine bad"; }
+          })
+          .catch(function () { e.textContent = "Backend not reachable."; e.className = "engine bad"; });
+      })();
+    </script>
   </body>
 </html>

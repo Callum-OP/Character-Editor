@@ -408,7 +408,7 @@ HAND_RES = 512
 def _hand_anchor(obj, lm, side):
     """Wrist + fingertip-reference points for one hand, in world space."""
     sign = 1 if side == "L" else -1
-    wx, hx = sign * lm["wrist_x"], sign * lm["hand_x"]
+    wx, hx, ex = sign * lm["wrist_x"], sign * lm["hand_x"], sign * lm["elbow_x"]
     vw = [obj.matrix_world @ v.co for v in obj.data.vertices]
     span = abs(hx - wx) or 0.05
 
@@ -416,7 +416,15 @@ def _hand_anchor(obj, lm, side):
         ys = [p.y for p in vw if abs(p.z - z) < 0.06 and abs(p.x - x) < 0.13]
         return (min(ys) + max(ys)) / 2.0 if ys else 0.0
 
-    wrist = Vector((wx, ycenter(lm["wrist_z"], wx), lm["wrist_z"]))
+    # Wrist depth from the forearm span (elbow->wrist), matching skeleton().
+    # A wrist-local sample is biased forward by the hand, which would place the
+    # proposed fingertip markers off the corrected rig's hand axis.
+    xlo, xhi = min(ex, wx), max(ex, wx)
+    zlo = min(lm["elbow_z"], lm["wrist_z"]) - 0.06
+    zhi = max(lm["elbow_z"], lm["wrist_z"]) + 0.06
+    fa = [p.y for p in vw if xlo <= p.x <= xhi and zlo <= p.z <= zhi]
+    wy = (min(fa) + max(fa)) / 2.0 if len(fa) >= 8 else ycenter(lm["wrist_z"], wx)
+    wrist = Vector((wx, wy, lm["wrist_z"]))
     tip = Vector((hx, wrist.y, lm["hand_z"]))
     return wrist, tip, span
 
@@ -519,6 +527,20 @@ def build_skeleton(obj, lm, fingers=False, standard=False, finger_tips_override=
         ys = [p.y for p in vw if abs(p.z - z) < ztol and abs(p.x - x) < xtol]
         return (min(ys) + max(ys)) / 2.0 if ys else 0.0
 
+    def limb_depth(x0, x1, z0, z1):
+        """Front-back (Y) midline of a limb segment sampled over its whole span
+        (x0..x1) rather than at one joint. `by(z, x)` at the wrist reaches past
+        it into the palm/fingers, which jut forward on most models, so the wrist
+        lands ahead of the elbow; the hand (which inherits the wrist's Y) then
+        tilts forward and its bones bend backward to reach the real fingers.
+        Averaging the whole forearm (elbow->wrist, hand excluded) puts the wrist
+        on the forearm's own centerline -- inside the mesh, in line with the
+        elbow. Returns None when too sparse (caller falls back to `by`)."""
+        xlo, xhi = min(x0, x1), max(x0, x1)
+        zlo, zhi = min(z0, z1) - 0.06, max(z0, z1) + 0.06
+        ys = [p.y for p in vw if xlo <= p.x <= xhi and zlo <= p.z <= zhi]
+        return (min(ys) + max(ys)) / 2.0 if len(ys) >= 8 else None
+
     # HIPS is the character root — every other bone descends from it. Figure apps
     # want the hip bone as the root; an extra floor/root bone above it is a known
     # cause of "register as character" failures, so we don't add one.
@@ -577,10 +599,16 @@ def build_skeleton(obj, lm, fingers=False, standard=False, finger_tips_override=
         ua = _bone(eb, f"UpperArm_{side}",
                    (shx, by(shz, shx), shz),
                    (ex, by(lm["elbow_z"], ex), lm["elbow_z"]), arm_parent, True)
+        # Wrist depth from the forearm centerline (not a wrist-local sample,
+        # which the forward-jutting hand biases) so the hand doesn't tilt
+        # forward and bend backward. Falls back to the local sample if sparse.
+        wrist_y = limb_depth(ex, wx, lm["elbow_z"], lm["wrist_z"])
+        if wrist_y is None:
+            wrist_y = by(lm["wrist_z"], wx)
         la = _bone(eb, f"LowerArm_{side}",
                    (ex, by(lm["elbow_z"], ex), lm["elbow_z"]),
-                   (wx, by(lm["wrist_z"], wx), lm["wrist_z"]), ua, True)
-        wrist_p = Vector((wx, by(lm["wrist_z"], wx), lm["wrist_z"]))
+                   (wx, wrist_y, lm["wrist_z"]), ua, True)
+        wrist_p = Vector((wx, wrist_y, lm["wrist_z"]))
         # Tip shares the wrist's depth (Y) so the hand axis follows the arm. If it
         # used the fingertips' own Y-center, the axis would tilt into the finger
         # fan and the finger bones would land skewed off the real fingers.

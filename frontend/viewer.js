@@ -109,7 +109,7 @@ export async function geometryFromFile(file) {
 }
 
 export class ModelViewer {
-  constructor(canvas, { background = 0x14161a } = {}) {
+  constructor(canvas, { background = 0x0b0e18 } = {}) {
     this.canvas = canvas;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -125,10 +125,10 @@ export class ModelViewer {
     this.scene.add(key);
     const rim = new THREE.DirectionalLight(0x88aaff, 0.6); rim.position.set(-4, 2, -3);
     this.scene.add(rim);
-    const grid = new THREE.GridHelper(10, 20, 0x2e353f, 0x232830);
+    const grid = new THREE.GridHelper(10, 20, 0x2c3556, 0x1a2038);
     grid.position.y = -1.001; this.scene.add(grid);
 
-    this.wireMat = new THREE.LineBasicMaterial({ color: 0x4f9dff });
+    this.wireMat = new THREE.LineBasicMaterial({ color: 0x7c8cff });
     this.models = {};        // key -> { group, surface, wire, markers }
     this.active = null;
     this.showWire = true;

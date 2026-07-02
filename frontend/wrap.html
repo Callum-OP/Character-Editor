@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Shape Match (Wrap) — Character Editor</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="/shell.js" defer></script>
   <script type="importmap">
   {
     "imports": {
@@ -14,10 +15,10 @@
   }
   </script>
 </head>
-<body>
+<body class="tool">
+  <div class="workspace">
   <aside id="panel">
-    <a class="hubnav" href="/">&larr; Character Editor</a>
-    <h1>Shape Match<br/><span class="thin">(Wrap)</span></h1>
+    <h1>Shape Match <span class="thin">(Wrap)</span></h1>
     <p class="sub">Reshape your model's vertices to match a reference, keeping
       your topology, features &amp; shape keys.</p>
 
@@ -136,6 +137,7 @@
     <div id="hint">Load a reference and your model to begin.</div>
     <canvas id="view"></canvas>
   </main>
+  </div>
 
   <script type="module" src="wrap.js"></script>
 </body>
