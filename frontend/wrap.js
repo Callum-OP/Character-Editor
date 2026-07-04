@@ -150,11 +150,13 @@ function onMarkerDragEnd() { dragActive = false; }
 // ---- file inputs ------------------------------------------------------------
 el("refFile").addEventListener("change", async () => {
   refFile = el("refFile").files[0] || null;
+  el("refFile").value = "";             // allow re-selecting the same file to reload
   if (refFile) { try { await viewer.setModelFromFile("reference", refFile, COLORS.reference); viewer.setActive("reference"); activeSeg("reference"); el("hint").classList.add("hidden"); } catch {} }
   if (refFile && srcFile) prepare();
 });
 el("srcFile").addEventListener("change", async () => {
   srcFile = el("srcFile").files[0] || null;
+  el("srcFile").value = "";             // allow re-selecting the same file to reload
   if (srcFile) { try { await viewer.setModelFromFile("source", srcFile, COLORS.source); viewer.setActive("source"); activeSeg("source"); el("hint").classList.add("hidden"); } catch {} }
   if (refFile && srcFile) prepare();
 });

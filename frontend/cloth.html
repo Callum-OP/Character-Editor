@@ -75,6 +75,15 @@
             <option value="3">Fine (slow, crisp wrinkles)</option>
           </select>
         </label>
+        <div class="field" style="border-top:1px solid var(--line,#2c3556);padding-top:8px">
+          <small>Reshape the pattern into your own garment — pins &amp; pleats scale with it.</small>
+        </div>
+        <label class="field"><span>Length <small>(hem drop)</small>: <b id="garmentLengthVal">1.00</b></span>
+          <input type="range" id="garmentLength" min="0.4" max="1.8" step="0.02" value="1" /></label>
+        <label class="field"><span>Width <small>(girth / fit)</small>: <b id="garmentGirthVal">1.00</b></span>
+          <input type="range" id="garmentGirth" min="0.6" max="1.8" step="0.02" value="1" /></label>
+        <label class="field"><span>Height on body <small>(raise / lower)</small>: <b id="garmentRiseVal">0.00</b></span>
+          <input type="range" id="garmentRise" min="-0.3" max="0.3" step="0.01" value="0" /></label>
       </div>
 
       <div id="customControls" class="hidden">
@@ -84,6 +93,7 @@
           <small>Your own garment mesh (e.g. a t-shirt). Its top edge is pinned; the
             rest drapes under gravity + collision.</small>
         </label>
+        <button type="button" id="garmentFromProject" class="seg hidden">◆ Use current project model as garment</button>
         <label class="check" id="shareSpaceRow"><input type="checkbox" id="shareSpace" checked />
           Align to body's coordinate space</label>
         <small id="shareSpaceHint">On: garment &amp; body are treated as authored in the same
@@ -121,6 +131,15 @@
         <input type="range" id="mass" min="0.05" max="1.2" step="0.01" value="0.3" /></label>
       <label class="field"><span>Friction: <b id="frictionVal"></b></span>
         <input type="range" id="friction" min="0" max="0.95" step="0.01" value="0.55" /></label>
+      <label class="field"><span>Cling to body <small>(hug vs. float)</small>: <b id="clingVal"></b></span>
+        <input type="range" id="cling" min="0" max="1" step="0.05" value="0.3" />
+        <small>Draws cloth onto the skin instead of letting it balloon out. Higher = clingier.</small></label>
+      <label class="field"><span>Skin gap <small>(fit closeness)</small>: <b id="gapVal"></b></span>
+        <input type="range" id="gap" min="0.004" max="0.06" step="0.002" value="0.03" />
+        <small>Thickness held off the body. Lower = tighter to the skin (raise if it pokes through).</small></label>
+      <label class="field"><span>Wrinkling <small>(extra folds)</small>: <b id="slackVal"></b></span>
+        <input type="range" id="slack" min="0" max="0.12" step="0.01" value="0" />
+        <small>Shrinks the fabric so excess material buckles into more folds &amp; creases.</small></label>
       <div class="field row">
         <label class="check"><input type="color" id="color" value="#b5483f" /> Colour</label>
         <label class="check"><input type="checkbox" id="dbl" checked /> Two-sided</label>

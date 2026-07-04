@@ -62,7 +62,11 @@ async function loadInput(file) {
     runBtn.disabled = false; setStatus("Ready. Click Retopologize.", "");
   } catch (err) { setStatus("Preview failed: " + err.message, "err"); runBtn.disabled = false; }
 }
-fileInput.addEventListener("change", () => loadInput(fileInput.files[0] || null));
+fileInput.addEventListener("change", () => {
+  const f = fileInput.files[0] || null;
+  fileInput.value = "";                 // allow re-selecting the same file to reload
+  loadInput(f);
+});
 window.addEventListener("project:use-model", (e) => loadInput(e.detail.file));
 
 runBtn.addEventListener("click", async () => {

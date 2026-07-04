@@ -177,7 +177,11 @@ dropzone.addEventListener("drop", (e) => {
   if (file) acceptFile(file);
 });
 browseBtn.addEventListener("click", () => fileInput.click());
-fileInput.addEventListener("change", () => { if (fileInput.files[0]) acceptFile(fileInput.files[0]); });
+fileInput.addEventListener("change", () => {
+  const f = fileInput.files[0];
+  fileInput.value = "";                 // allow re-selecting the same file to reload
+  if (f) acceptFile(f);
+});
 // carry a model in from the active project
 window.addEventListener("project:use-model", (e) => acceptFile(e.detail.file));
 

@@ -80,6 +80,7 @@ function setBody(geom, { isMannequin = false } = {}) {
 
 $("body").addEventListener("change", async () => {
   const f = $("body").files[0]; if (!f) return;
+  $("body").value = "";                 // allow re-selecting the same file to reload
   status("Loading body…", "busy");
   try {
     const { surface } = await geometryFromFile(f);
@@ -109,6 +110,7 @@ function syncGarmentSourceUI() {
   // Shared-space alignment only applies to an uploaded reference body.
   $("shareSpaceRow").classList.toggle("hidden", bodyIsMannequin);
   $("shareSpaceHint").classList.toggle("hidden", bodyIsMannequin);
+  refreshProjectGarmentBtn();
 }
 
 function clearCloth() {
@@ -149,6 +151,39 @@ function placeGarment(raw) {
   return g;
 }
 
+// Reshape a freshly-built preset garment to the size/position sliders, turning a
+// template into custom clothing. Length scales the hem drop below the garment's
+// top (pinned) band; Width scales girth radially about the body's vertical axis;
+// Height raises/lowers the whole garment on the body. Each edge's rest length is
+// scaled by that edge's own length change, so intentional slack (e.g. a gathered
+// skirt's pleats) is preserved instead of being fought by the stretch solver.
+function reshapeSpec(spec) {
+  const L = +$("garmentLength").value, G = +$("garmentGirth").value, R = +$("garmentRise").value;
+  if (L === 1 && G === 1 && R === 0) return;
+  const p = spec.positions, n = spec.count, E = spec.ei.length;
+  const old = new Float32Array(E);                       // per-edge length before
+  for (let k = 0; k < E; k++) {
+    const a = spec.ei[k], b = spec.ej[k];
+    old[k] = Math.hypot(p[3 * a] - p[3 * b], p[3 * a + 1] - p[3 * b + 1], p[3 * a + 2] - p[3 * b + 2]);
+  }
+  let topY = -Infinity;
+  for (let i = 0; i < n; i++) if (p[3 * i + 1] > topY) topY = p[3 * i + 1];
+  const c = bodyBox.getCenter(new THREE.Vector3());
+  const riseY = R * (bodyBox.max.y - bodyBox.min.y);
+  for (let i = 0; i < n; i++) {
+    const ix = 3 * i;
+    p[ix] = c.x + (p[ix] - c.x) * G;                     // girth about the body axis
+    p[ix + 2] = c.z + (p[ix + 2] - c.z) * G;
+    p[ix + 1] = topY + (p[ix + 1] - topY) * L + riseY;   // hem drop + reposition
+  }
+  for (let k = 0; k < E; k++) {                          // rescale rest lengths to match
+    if (old[k] < 1e-9) continue;
+    const a = spec.ei[k], b = spec.ej[k];
+    const nl = Math.hypot(p[3 * a] - p[3 * b], p[3 * a + 1] - p[3 * b + 1], p[3 * a + 2] - p[3 * b + 2]);
+    spec.rest[k] *= nl / old[k];
+  }
+}
+
 function rebuildGarment() {
   if (!bodyBox) return;
   playing = false; setPlay(false);
@@ -164,6 +199,7 @@ function rebuildGarment() {
       fullness: +$("fullness").value, detail: +$("detail").value,
       bodyPositions: bodyGeomWorld.getAttribute("position").array,
     });
+    reshapeSpec(spec);
   }
 
   sim = new ClothSim(spec, { mass: +$("mass").value });
@@ -198,6 +234,11 @@ $("garment").addEventListener("change", rebuildGarment);
 $("detail").addEventListener("change", rebuildGarment);
 $("fullness").addEventListener("input", () => { $("fullnessVal").textContent = (+$("fullness").value).toFixed(2); });
 $("fullness").addEventListener("change", rebuildGarment);
+// size / position reshape sliders (preset garments -> custom clothing)
+for (const id of ["garmentLength", "garmentGirth", "garmentRise"]) {
+  $(id).addEventListener("input", () => { $(id + "Val").textContent = (+$(id).value).toFixed(2); });
+  $(id).addEventListener("change", rebuildGarment);
+}
 
 // ---- custom garment mesh source
 $("garmentSource").addEventListener("change", () => {
@@ -205,18 +246,40 @@ $("garmentSource").addEventListener("change", () => {
   syncGarmentSourceUI();
   rebuildGarment();
 });
+// Load a garment mesh (from a File) as the custom garment to drape.
+async function loadGarmentFile(f) {
+  const { surface } = await geometryFromFile(f);
+  customGarmentGeom = surface;
+  garmentSource = "custom"; $("garmentSource").value = "custom";
+  syncGarmentSourceUI();
+  rebuildGarment();
+}
 $("garmentFile").addEventListener("change", async () => {
   const f = $("garmentFile").files[0]; if (!f) return;
+  $("garmentFile").value = "";          // allow re-selecting the same file to reload
   status("Loading garment…", "busy");
+  try { await loadGarmentFile(f); status("Garment loaded — press Drape.", "ok"); }
+  catch (e) { status("Garment failed: " + e.message, "err"); }
+});
+
+// Pull the active project's current model in AS THE GARMENT (not the body), so a
+// character/garment carried through the pipeline can be draped & reshaped here.
+function refreshProjectGarmentBtn() {
+  const has = !!(window.Project && Project.current && Project.current());
+  $("garmentFromProject").classList.toggle("hidden", !has);
+}
+$("garmentFromProject").addEventListener("click", async () => {
+  if (!window.Project) return;
+  status("Loading garment from project…", "busy");
   try {
-    const { surface } = await geometryFromFile(f);
-    customGarmentGeom = surface;
-    garmentSource = "custom"; $("garmentSource").value = "custom";
-    syncGarmentSourceUI();
-    rebuildGarment();
-    status("Garment loaded — press Drape.", "ok");
+    const f = await Project.getCurrentFile();
+    if (!f) { status("No current model in this project yet.", "err"); return; }
+    await loadGarmentFile(f);
+    status("Garment loaded from project — press Drape.", "ok");
   } catch (e) { status("Garment failed: " + e.message, "err"); }
 });
+window.addEventListener("project:change", refreshProjectGarmentBtn);
+setTimeout(refreshProjectGarmentBtn, 600);   // project manifest loads async on boot
 $("shareSpace").addEventListener("change", rebuildGarment);
 $("pinTop").addEventListener("input", () => $("pinTopVal").textContent = Math.round(+$("pinTop").value * 100) + "%");
 $("pinTop").addEventListener("change", rebuildGarment);
@@ -227,17 +290,18 @@ $("fitOffset").addEventListener("change", rebuildGarment);
 
 // ------------------------------------------------------------------- fabric
 const PRESETS = {
-  cotton:  { stretch: 0.95, bend: 0.32, mass: 0.30, friction: 0.55 },
-  silk:    { stretch: 0.97, bend: 0.12, mass: 0.16, friction: 0.35 },
-  chiffon: { stretch: 0.96, bend: 0.05, mass: 0.10, friction: 0.30 },
-  denim:   { stretch: 0.99, bend: 0.70, mass: 0.60, friction: 0.65 },
-  leather: { stretch: 0.99, bend: 0.85, mass: 0.85, friction: 0.70 },
-  wool:    { stretch: 0.94, bend: 0.45, mass: 0.45, friction: 0.60 },
+  cotton:  { stretch: 0.95, bend: 0.32, mass: 0.30, friction: 0.55, cling: 0.30 },
+  silk:    { stretch: 0.97, bend: 0.12, mass: 0.16, friction: 0.35, cling: 0.50 },
+  chiffon: { stretch: 0.96, bend: 0.05, mass: 0.10, friction: 0.30, cling: 0.55 },
+  denim:   { stretch: 0.99, bend: 0.70, mass: 0.60, friction: 0.65, cling: 0.12 },
+  leather: { stretch: 0.99, bend: 0.85, mass: 0.85, friction: 0.70, cling: 0.10 },
+  wool:    { stretch: 0.94, bend: 0.45, mass: 0.45, friction: 0.60, cling: 0.35 },
 };
 $("preset").addEventListener("change", () => {
   const p = PRESETS[$("preset").value]; if (!p) return;
   $("stretch").value = p.stretch; $("bend").value = p.bend;
   $("mass").value = p.mass; $("friction").value = p.friction;
+  $("cling").value = p.cling;
   applyFabric();
 });
 
@@ -246,6 +310,9 @@ function applyFabric() {
   $("bendVal").textContent = (+$("bend").value).toFixed(2);
   $("massVal").textContent = (+$("mass").value).toFixed(2);
   $("frictionVal").textContent = (+$("friction").value).toFixed(2);
+  $("clingVal").textContent = (+$("cling").value).toFixed(2);
+  $("gapVal").textContent = (+$("gap").value).toFixed(3);
+  $("slackVal").textContent = (+$("slack").value).toFixed(2);
   $("gravityVal").textContent = (+$("gravity").value).toFixed(1);
   $("windVal").textContent = (+$("wind").value).toFixed(1);
   clothMat.color.set($("color").value);
@@ -254,10 +321,13 @@ function applyFabric() {
   sim.setStiffness({ stretch: +$("stretch").value, shear: 0.6, bend: +$("bend").value });
   sim.setMass(+$("mass").value);
   sim.setParam("friction", +$("friction").value);
+  sim.setParam("cling", +$("cling").value);
+  sim.setParam("thickness", +$("gap").value);
+  sim.setParam("slack", +$("slack").value);
   sim.setParam("gravity", -(+$("gravity").value));
   sim.setParam("wind", +$("wind").value);
 }
-for (const id of ["stretch", "bend", "mass", "friction", "gravity", "wind"])
+for (const id of ["stretch", "bend", "mass", "friction", "cling", "gap", "slack", "gravity", "wind"])
   $(id).addEventListener("input", applyFabric);
 $("color").addEventListener("input", applyFabric);
 $("dbl").addEventListener("change", applyFabric);

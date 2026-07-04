@@ -58,6 +58,9 @@ export class ClothSim {
       gravity: -9.8, damping: 1.2, friction: 0.55, thickness: 0.03,
       substeps: 12, wind: 0, comp: [stretchComp(0.95), shearComp(0.7), bendComp(0.35)],
       floor: null,                          // y of an optional ground plane
+      cling: 0.3,                           // 0..1 attraction that hugs cloth to the body
+      clingBand: 0.06,                      // how far off the skin cling still reaches (<= collider pad)
+      slack: 0,                             // 0..~0.12 rest-length compression -> extra buckling wrinkles
     };
     this._wind = new THREE.Vector3();
   }
@@ -117,7 +120,7 @@ export class ClothSim {
     // 2. solve constraints (single Gauss-Seidel sweep; lambdas reset each substep)
     this.lambda.fill(0);
     const { ei, ej, rest, egroup, lambda } = this;
-    const comp = this.params.comp, isdt2 = 1 / (sdt * sdt);
+    const comp = this.params.comp, isdt2 = 1 / (sdt * sdt), slack = this.params.slack;
     for (let k = 0; k < ei.length; k++) {
       const i = ei[k], j = ej[k];
       const wi = invMass[i], wj = invMass[j];
@@ -125,8 +128,14 @@ export class ClothSim {
       const ix = 3 * i, jx = 3 * j;
       let dx = pos[ix] - pos[jx], dy = pos[ix + 1] - pos[jx + 1], dz = pos[ix + 2] - pos[jx + 2];
       const len = Math.sqrt(dx * dx + dy * dy + dz * dz); if (len < 1e-9) continue;
-      const C = len - rest[k];
-      const alpha = comp[egroup[k]] * isdt2;
+      const grp = egroup[k];
+      // Shrink the target length of in-plane (structural/shear) edges so the sheet
+      // wants to be smaller than the space it fills; pinned + collided, it can't
+      // contract, so it buckles out of plane into extra folds. Bend edges (grp 2)
+      // are left alone so this reads as wrinkling, not curling.
+      const r = slack && grp < 2 ? rest[k] * (1 - slack) : rest[k];
+      const C = len - r;
+      const alpha = comp[grp] * isdt2;
       const dl = -(C + alpha * lambda[k]) / (wsum + alpha);
       lambda[k] += dl;
       const s = dl / len;
@@ -153,23 +162,43 @@ export class ClothSim {
 
   _collide(i) {
     const pos = this.pos, prev = this.prev, ix = 3 * i, th = this.params.thickness;
+    const f = this.params.friction;
     // floor
     if (this.params.floor != null && pos[ix + 1] < this.params.floor + th) {
       pos[ix + 1] = this.params.floor + th;
       // ground friction: cancel horizontal slip
-      prev[ix] += (pos[ix] - prev[ix]) * this.params.friction;
-      prev[ix + 2] += (pos[ix + 2] - prev[ix + 2]) * this.params.friction;
+      prev[ix] += (pos[ix] - prev[ix]) * f;
+      prev[ix + 2] += (pos[ix + 2] - prev[ix + 2]) * f;
     }
     if (!this.collider) return;
-    const hit = this.collider.resolve(pos[ix], pos[ix + 1], pos[ix + 2], th);
-    if (!hit) return;
-    pos[ix] = hit.x; pos[ix + 1] = hit.y; pos[ix + 2] = hit.z;
-    // tangential friction so cloth grips the body instead of sliding off
-    const f = this.params.friction;
-    let mx = pos[ix] - prev[ix], my = pos[ix + 1] - prev[ix + 1], mz = pos[ix + 2] - prev[ix + 2];
-    const dn = mx * hit.nx + my * hit.ny + mz * hit.nz;     // normal component of motion
-    const tx = mx - dn * hit.nx, ty = my - dn * hit.ny, tz = mz - dn * hit.nz;
-    prev[ix] += tx * f; prev[ix + 1] += ty * f; prev[ix + 2] += tz * f;
+    const q = this.collider.query(pos[ix], pos[ix + 1], pos[ix + 2]);
+    if (!q) return;
+    // Target rest position = a `th`-thick shell floating just off the skin.
+    const tx = q.x + q.nx * th, ty = q.y + q.ny * th, tz = q.z + q.nz * th;
+    const cling = this.params.cling;
+    if (q.dist < th) {
+      // penetrating / touching: hard push-out onto the shell, full friction grip
+      pos[ix] = tx; pos[ix + 1] = ty; pos[ix + 2] = tz;
+      this._friction(ix, q, f);
+    } else if (cling > 0 && q.dist < th + this.params.clingBand) {
+      // floating just off the body: draw it onto the shell so the fabric hugs the
+      // skin instead of ballooning out. Fractional pull -> can't overshoot.
+      pos[ix] += (tx - pos[ix]) * cling;
+      pos[ix + 1] += (ty - pos[ix + 1]) * cling;
+      pos[ix + 2] += (tz - pos[ix + 2]) * cling;
+      this._friction(ix, q, f * 0.5);
+    }
+  }
+
+  // Cancel the tangential part of this substep's motion so cloth grips the body
+  // (surface normal in `hit`) instead of sliding off it. `f` = friction fraction.
+  _friction(ix, hit, f) {
+    const pos = this.pos, prev = this.prev;
+    const mx = pos[ix] - prev[ix], my = pos[ix + 1] - prev[ix + 1], mz = pos[ix + 2] - prev[ix + 2];
+    const dn = mx * hit.nx + my * hit.ny + mz * hit.nz;    // normal component of motion
+    prev[ix] += (mx - dn * hit.nx) * f;
+    prev[ix + 1] += (my - dn * hit.ny) * f;
+    prev[ix + 2] += (mz - dn * hit.nz) * f;
   }
 
   // kinetic energy proxy — used to auto-pause once the drape settles
@@ -232,9 +261,11 @@ export class BodyCollider {
   _cj(y) { return Math.max(0, Math.min(this.ny - 1, Math.floor((y - this.min.y) / this.cell))); }
   _ck(z) { return Math.max(0, Math.min(this.nz - 1, Math.floor((z - this.min.z) / this.cell))); }
 
-  // Returns null (no contact) or {x,y,z, nx,ny,nz} — pushed-out position + unit
-  // surface normal at the contact.
-  resolve(px, py, pz, thickness) {
+  // Nearest point on the body to (px,py,pz). Returns null (no triangles nearby)
+  // or {dist, x,y,z, nx,ny,nz} — the nearest *surface* point, its distance, and
+  // the unit normal from surface toward the query point. The caller decides what
+  // to do with it (push out of a contact, or gently cling to a near miss).
+  query(px, py, pz) {
     const key = this._ci(px) + this.nx * (this._cj(py) + this.ny * this._ck(pz));
     const arr = this.grid.get(key); if (!arr) return null;
     const t = this.tris;
@@ -252,11 +283,10 @@ export class BodyCollider {
     }
     if (best === Infinity) return null;
     const dist = Math.sqrt(best);
-    if (dist >= thickness) return null;
     let nx, ny, nz;
     if (dist > 1e-6) { nx = (px - bx) / dist; ny = (py - by) / dist; nz = (pz - bz) / dist; }
     else { nx = 0; ny = 1; nz = 0; }                // degenerate: shove up
-    return { x: bx + nx * thickness, y: by + ny * thickness, z: bz + nz * thickness, nx, ny, nz };
+    return { dist, x: bx, y: by, z: bz, nx, ny, nz };
   }
 }
 

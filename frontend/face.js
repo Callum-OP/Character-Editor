@@ -103,6 +103,7 @@ async function checkEngine() {
 
 el("file").addEventListener("change", () => {
   file = el("file").files[0] || null;
+  el("file").value = "";                // allow re-selecting the same file to reload
   el("run").disabled = !file;
   if (file) setStatus("Ready. Generate expressions.", "");
 });
