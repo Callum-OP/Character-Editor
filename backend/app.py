@@ -16,6 +16,7 @@ import json
 import uuid
 import shutil
 import time
+import zipfile
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -270,6 +271,65 @@ async def cloth_convert(file: UploadFile = File(...), out_format: str = Form("fb
     except Exception as e:
         raise HTTPException(500, str(e))
 
+    return JSONResponse({
+        "job_id": job_id,
+        "download_url": f"/api/download/{job_id}/{out_name}",
+        "download_name": out_name,
+    })
+
+
+@app.post("/api/paint/export")
+async def paint_export(file: UploadFile = File(...), out_format: str = Form("fbx")):
+    """Transcode a painted model (uploaded as a GLB with its texture embedded)
+    into another format, keeping the texture bundled with the mesh.
+
+    Blender re-encodes it into an isolated export folder. FBX embeds the texture
+    in one file; OBJ/glTF write the texture as sidecar files, so those are
+    returned as a .zip so nothing is lost. PLY/STL carry geometry only."""
+    out_ext = "." + out_format.lower().lstrip(".")
+    if out_ext not in SUPPORTED_OUT:
+        raise HTTPException(400, f"Unsupported output format '{out_ext}'.")
+    in_ext = os.path.splitext(file.filename or "")[1].lower() or ".glb"
+    if in_ext not in SUPPORTED_IN:
+        raise HTTPException(400, f"Unsupported input format '{in_ext}'.")
+
+    job_id = uuid.uuid4().hex
+    job_dir = os.path.join(WORK, job_id)
+    # Export into a dedicated subfolder so we can bundle *everything* Blender
+    # writes for this format (mesh + material + texture images) into one zip.
+    export_dir = os.path.join(job_dir, "export")
+    os.makedirs(export_dir, exist_ok=True)
+    in_path = os.path.join(job_dir, "painted_in" + in_ext)
+    with open(in_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    out_path = os.path.join(export_dir, "painted" + out_ext)
+    try:
+        if out_ext == in_ext:
+            shutil.copy(in_path, out_path)
+        else:
+            retopo.convert_format(in_path, out_path)
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+    # If the format produced sidecar files (an .mtl + texture image for OBJ, or a
+    # .bin + textures for glTF), zip the whole export folder so the texture is
+    # delivered with the model. A lone file is returned as-is.
+    produced = [n for n in os.listdir(export_dir) if os.path.isfile(os.path.join(export_dir, n))]
+    if len(produced) > 1:
+        out_name = "painted_" + out_ext.lstrip(".") + ".zip"
+        zip_path = os.path.join(job_dir, out_name)
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+            for n in produced:
+                z.write(os.path.join(export_dir, n), n)
+        return JSONResponse({
+            "job_id": job_id,
+            "download_url": f"/api/download/{job_id}/{out_name}",
+            "download_name": out_name,
+        })
+
+    out_name = "painted" + out_ext
+    shutil.copy(out_path, os.path.join(job_dir, out_name))
     return JSONResponse({
         "job_id": job_id,
         "download_url": f"/api/download/{job_id}/{out_name}",

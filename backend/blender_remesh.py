@@ -429,10 +429,13 @@ def nonsym_remesh(obj, topology, faces, sharp, notes):
 def export_model(path):
     ext = os.path.splitext(path)[1].lower()
     if ext == ".obj":
+        # path_mode COPY writes the texture image next to the .obj/.mtl so a
+        # painted model's texture is delivered alongside it (bundled as a zip
+        # by the caller), instead of the .mtl pointing at a missing file.
         if hasattr(bpy.ops.wm, "obj_export"):
-            bpy.ops.wm.obj_export(filepath=path, export_selected_objects=False)
+            bpy.ops.wm.obj_export(filepath=path, export_selected_objects=False, path_mode="COPY")
         else:
-            bpy.ops.export_scene.obj(filepath=path)
+            bpy.ops.export_scene.obj(filepath=path, path_mode="COPY")
     elif ext in (".glb", ".gltf"):
         fmt = "GLB" if ext == ".glb" else "GLTF_SEPARATE"
         # Export shape keys as morph targets WITH their own normals so deformed
@@ -442,7 +445,10 @@ def export_model(path):
             export_morph=True, export_morph_normal=True,
         )
     elif ext == ".fbx":
-        bpy.ops.export_scene.fbx(filepath=path)
+        # path_mode COPY + embed_textures packs any image textures *inside* the
+        # .fbx, so a painted model exports as one self-contained file rather than
+        # an .fbx that references missing external images.
+        bpy.ops.export_scene.fbx(filepath=path, path_mode="COPY", embed_textures=True)
     elif ext == ".ply":
         if hasattr(bpy.ops.wm, "ply_export"):
             bpy.ops.wm.ply_export(filepath=path)

@@ -19,8 +19,12 @@ is a hub linking to individual tools; it's built to grow.
    browser. A layered studio (blend modes, per-layer opacity/visibility) with an
    advanced brush set — paint, airbrush, eraser, soft **smudge** & **blur**,
    bucket fill and eyedropper — plus **mirror symmetry** so one stroke paints
-   both sides. Runs entirely client-side (Three.js); export the texture as PNG or
-   the whole painted model as GLB, or save it back to the project. No backend.
+   both sides. Load an existing texture (PNG/JPG/WebP) back in as a layer to keep
+   editing it. Painting runs client-side (Three.js); export the texture as PNG or
+   the painted model as **GLB / FBX / OBJ / glTF / PLY / STL** — GLB & FBX carry
+   the texture embedded, OBJ/glTF come back as a zip with the texture bundled
+   (non-GLB formats transcode through the Blender backend). Save back to the
+   project as a self-contained GLB.
 
 ## How it works
 

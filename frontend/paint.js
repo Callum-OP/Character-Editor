@@ -382,7 +382,19 @@ async function loadFiles(fileList) {
   const files = [...fileList];
   if (!files.length) return;
   const isModel = (n) => /\.(glb|gltf|vrm|fbx|obj|ply|stl)$/i.test(n);
-  const main = files.find((f) => isModel(f.name)) || files[0];
+  const isImage = (n) => /\.(png|jpe?g|webp|bmp|gif)$/i.test(n);
+
+  // Loose image files (a re-imported texture map, a pattern, a photo) are
+  // painted onto the current model as new layers rather than loaded as geometry.
+  const images = files.filter((f) => isImage(f.name));
+  const models = files.filter((f) => isModel(f.name));
+  if (images.length && !models.length) {
+    if (!currentSurface) { toast("Load a model first, then drop a texture onto it.", "err"); return; }
+    for (const img of images) await loadTextureLayer(img);
+    return;
+  }
+
+  const main = models[0] || files[0];
 
   showLoading(true);
   const blobs = new Map();
@@ -420,6 +432,30 @@ async function loadFiles(fileList) {
     main.arrayBuffer().then((b) => { const g = new STLLoader().parse(b); g.computeVertexNormals(); done(wrapGeom(g)); }, fail);
   } else {
     fail(new Error("Unsupported format: " + fmt));
+  }
+}
+
+// Load an image file and drop it onto the current surface as a new texture
+// layer (stretched over the UV space). Like the "+ layer" button, adding a
+// layer isn't an undoable step — delete the layer to remove it again.
+async function loadTextureLayer(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => {
+      const im = new Image();
+      im.onload = () => res(im);
+      im.onerror = () => rej(new Error("decode failed"));
+      im.src = url;
+    });
+    currentSurface.addImageLayer(img, file.name.replace(/\.[^.]+$/, ""));
+    rebuildLayers();
+    queuePreview();
+    toast(`Added texture layer “${file.name}”.`, "ok");
+  } catch (err) {
+    console.error(err);
+    toast(`✕ Couldn't load image “${file.name}”.`, "err");
+  } finally {
+    URL.revokeObjectURL(url);
   }
 }
 
@@ -655,8 +691,8 @@ function setupUI() {
   document.getElementById("redo-btn").addEventListener("click", redo);
 
   document.getElementById("export-btn").addEventListener("click", exportTexture);
-  document.getElementById("glb-btn").addEventListener("click", () => exportGLB(false));
-  document.getElementById("save-btn").addEventListener("click", () => exportGLB(true));
+  document.getElementById("glb-btn").addEventListener("click", () => exportModel(false));
+  document.getElementById("save-btn").addEventListener("click", () => exportModel(true));
 
   // Swatches
   const swatchColors = ["#e5484d", "#f5a524", "#f7e733", "#46a758", "#4c8bf5",
@@ -708,25 +744,60 @@ function exportTexture() {
   toast("Exported texture PNG");
 }
 
-// Export the whole painted model as GLB. When `toProject` is set, save it as
-// the active project's current model instead of downloading.
-function exportGLB(toProject) {
+// Serialize the painted model to a binary GLB blob. GLTFExporter reads the
+// composite CanvasTexture straight off each mesh, so the painted texture is
+// embedded inside the .glb — a single self-contained file.
+function buildGLB() {
+  return new Promise((resolve, reject) => {
+    new GLTFExporter().parse(
+      modelRoot,
+      (result) => resolve(new Blob([result], { type: "model/gltf-binary" })),
+      reject,
+      { binary: true },
+    );
+  });
+}
+
+function downloadBlob(blob, name) {
+  const a = document.createElement("a");
+  a.download = name; a.href = URL.createObjectURL(blob); a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+// Export the whole painted model. `glb` is written in the browser with its
+// texture embedded; every other format is transcoded from that GLB by the
+// Blender backend, which bundles the texture into the file (FBX) or a zip
+// (OBJ/glTF). When `toProject` is set we always store the self-contained GLB.
+async function exportModel(toProject) {
   if (!modelRoot) { toast("Load a model first.", "err"); return; }
+  const fmt = toProject ? "glb" : (document.getElementById("export-format").value || "glb");
   showLoading(true);
-  const exporter = new GLTFExporter();
-  exporter.parse(modelRoot, (result) => {
-    const blob = new Blob([result], { type: "model/gltf-binary" });
-    const name = "painted.glb";
-    if (toProject && window.Project) {
-      Project.saveResult({ blob, name, tool: "Paint" }).finally(() => showLoading(false));
-    } else {
-      const a = document.createElement("a");
-      a.download = name; a.href = URL.createObjectURL(blob); a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-      showLoading(false);
-      toast("Exported painted.glb");
+  try {
+    const glb = await buildGLB();
+    if (toProject) {
+      if (window.Project) await Project.saveResult({ blob: glb, name: "painted.glb", tool: "Paint" });
+      return;
     }
-  }, (err) => { console.error(err); toast("✕ GLB export failed.", "err"); showLoading(false); }, { binary: true });
+    if (fmt === "glb") {
+      downloadBlob(glb, "painted.glb");
+      toast("Exported painted.glb");
+      return;
+    }
+    toast(`Converting to ${fmt.toUpperCase()} via Blender…`);
+    const fd = new FormData();
+    fd.append("file", new File([glb], "painted.glb"));
+    fd.append("out_format", fmt);
+    const resp = await fetch("/api/paint/export", { method: "POST", body: fd });
+    if (!resp.ok) throw new Error((await resp.text()).slice(0, 200));
+    const data = await resp.json();
+    downloadBlob(await (await fetch(data.download_url)).blob(), data.download_name);
+    toast(`Exported ${data.download_name}`);
+  } catch (err) {
+    console.error(err);
+    toast("✕ Export failed: " + err.message, "err");
+  } finally {
+    showLoading(false);
+  }
 }
 
 // ---------------------------------------------------------------------------

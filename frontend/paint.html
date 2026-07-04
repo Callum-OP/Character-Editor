@@ -37,7 +37,9 @@
         <span>Upload model</span>
         <input type="file" id="file-input"
           accept=".glb,.gltf,.vrm,.obj,.fbx,.ply,.stl,.bin,.png,.jpg,.jpeg,.webp" multiple />
-        <small>.glb / .gltf / .vrm / .obj / .fbx / .ply / .stl — needs UV coordinates to paint.</small>
+        <small>.glb / .gltf / .vrm / .obj / .fbx / .ply / .stl — needs UV coordinates
+          to paint. An image (.png / .jpg / .webp) on its own loads as a new
+          texture layer on the current model.</small>
       </label>
       <button type="button" data-project-use class="hidden">Use current project model</button>
       <label class="field row">
@@ -152,7 +154,21 @@
     <details class="grp" open>
       <summary>Export</summary>
       <button class="seg" id="export-btn" style="width:100%;margin-bottom:6px">⬇ Export texture (PNG)</button>
-      <button class="seg" id="glb-btn" style="width:100%;margin-bottom:6px">⬇ Download model (GLB)</button>
+      <label class="field row">
+        <span>Model format</span>
+        <select id="export-format">
+          <option value="glb" selected>GLB — texture embedded</option>
+          <option value="fbx">FBX — texture embedded</option>
+          <option value="obj">OBJ — texture bundled (.zip)</option>
+          <option value="gltf">glTF — texture bundled (.zip)</option>
+          <option value="ply">PLY — geometry only</option>
+          <option value="stl">STL — geometry only</option>
+        </select>
+      </label>
+      <small id="export-hint">GLB is self-contained — the painted texture travels
+        inside the file. FBX embeds it too; OBJ/glTF come back as a .zip with the
+        texture alongside. PLY/STL carry geometry only.</small>
+      <button class="seg" id="glb-btn" style="width:100%;margin:6px 0">⬇ Download model</button>
       <button class="download" id="save-btn">◆ Save to project</button>
       <button type="button" data-save-new="Paint" class="seg hidden" style="width:100%;margin-top:6px">＋ Save as new project</button>
     </details>

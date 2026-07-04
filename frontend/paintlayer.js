@@ -188,6 +188,21 @@ export class PaintSurface {
     this.recomposite();
   }
 
+  // Load an external image (a re-imported texture map) onto its own new layer,
+  // stretched to fill the UV texture space. Handy for continuing work on an
+  // exported PNG, or dropping a photo/pattern onto the model as a base.
+  addImageLayer(image, name) {
+    const l = this._newLayer(name || "Texture");
+    l.ctx.globalCompositeOperation = "source-over";
+    l.ctx.globalAlpha = 1;
+    l.ctx.drawImage(image, 0, 0, this.size, this.size);
+    const i = this._index(this.activeId);
+    this.layers.splice(i + 1, 0, l);   // above the active layer
+    this.activeId = l.id;
+    this.recomposite();
+    return l;
+  }
+
   // ---- compositing --------------------------------------------------------
   // Flatten all layers into `composite`. If `liveActive` is supplied it is
   // substituted for the active layer's pixels (used for the live stroke view).
