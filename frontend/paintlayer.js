@@ -375,7 +375,11 @@ export class PaintSurface {
   }
 
   // Paint-bucket flood fill on the active layer (scanline, colour tolerance).
-  floodFill(uv, brush, tolerance = 32) {
+  // opts.respectSeams keeps the fill inside the UV island under the cursor, so a
+  // seam that splits the surface into separate texture areas also splits the
+  // fill (touching-but-different islands won't bleed into one another).
+  floodFill(uv, brush, opts = {}) {
+    const tolerance = opts.tolerance ?? 32;
     const S = this.size;
     const p = this.uvToPixel(uv);
     const x0 = Math.floor(p.x), y0 = Math.floor(p.y);
@@ -391,7 +395,14 @@ export class PaintSurface {
     const erase = brush.tool === "erase";
     const alpha = brush.opacity;
 
+    // Seam gate: constrain to the seed texel's UV island (0 = uncovered/seam gap,
+    // in which case we skip the gate rather than trap the fill in the gaps).
+    const islands = opts.respectSeams ? this._ensureIslandMap() : null;
+    const seedIsland = islands ? islands[y0 * S + x0] : 0;
+    const useIsland = !!(islands && seedIsland);
+
     const matches = (i) =>
+      (!useIsland || islands[i >> 2] === seedIsland) &&
       Math.abs(data[i] - sr) <= tolerance &&
       Math.abs(data[i + 1] - sg) <= tolerance &&
       Math.abs(data[i + 2] - sb) <= tolerance &&
@@ -425,6 +436,53 @@ export class PaintSurface {
     }
     c.putImageData(img, 0, 0);
     this.recomposite();
+  }
+
+  // Build (once, then cache) a texel -> UV-island id map for the mesh. Two
+  // triangles are in the same island when they share an edge in UV space; a UV
+  // seam is exactly where 3D-adjacent triangles are *not* adjacent in UV, so the
+  // seam separates islands. Triangles are rasterized into the map at their island
+  // id (+1; 0 means no triangle covers that texel).
+  _ensureIslandMap() {
+    if (this._islandMap !== undefined) return this._islandMap;
+    const geo = this.mesh.geometry;
+    const uvAttr = geo && geo.getAttribute("uv");
+    if (!uvAttr) return (this._islandMap = null);
+
+    const S = this.size;
+    const index = geo.index ? geo.index.array : null;
+    const triCount = (index ? index.length : uvAttr.count) / 3 | 0;
+    const corner = (t, k) => (index ? index[t * 3 + k] : t * 3 + k);
+
+    // Union-find over triangles, merging any two that share a quantized UV edge.
+    const parent = new Int32Array(triCount);
+    for (let i = 0; i < triCount; i++) parent[i] = i;
+    const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    const union = (a, b) => { a = find(a); b = find(b); if (a !== b) parent[b] = a; };
+
+    const Q = 4096;
+    const vkey = (v) => Math.round(uvAttr.getX(v) * Q) + "," + Math.round(uvAttr.getY(v) * Q);
+    const edgeMap = new Map();
+    const linkEdge = (t, k1, k2) => {
+      const ek = k1 < k2 ? k1 + "|" + k2 : k2 + "|" + k1;
+      const prev = edgeMap.get(ek);
+      if (prev === undefined) edgeMap.set(ek, t); else union(prev, t);
+    };
+    for (let t = 0; t < triCount; t++) {
+      const ka = vkey(corner(t, 0)), kb = vkey(corner(t, 1)), kc = vkey(corner(t, 2));
+      linkEdge(t, ka, kb); linkEdge(t, kb, kc); linkEdge(t, kc, ka);
+    }
+
+    const map = new Int32Array(S * S);       // 0 = uncovered
+    for (let t = 0; t < triCount; t++) {
+      const id = find(t) + 1;
+      const a = corner(t, 0), b = corner(t, 1), cc = corner(t, 2);
+      rasterTri(map, S, id,
+        uvAttr.getX(a), uvAttr.getY(a),
+        uvAttr.getX(b), uvAttr.getY(b),
+        uvAttr.getX(cc), uvAttr.getY(cc));
+    }
+    return (this._islandMap = map);
   }
 
   // ---- undo helpers (raw active-layer pixels) -----------------------------
@@ -462,6 +520,29 @@ function makeCanvas(size) {
   const c = document.createElement("canvas");
   c.width = c.height = size;
   return c;
+}
+// Rasterize a triangle (given in UV space, 0..1) into `map` at value `id`, in the
+// same flipped pixel space the painter samples (x = u*S, y = (1-v)*S).
+function rasterTri(map, S, id, u0, v0, u1, v1, u2, v2) {
+  const x0 = u0 * S, y0 = (1 - v0) * S;
+  const x1 = u1 * S, y1 = (1 - v1) * S;
+  const x2 = u2 * S, y2 = (1 - v2) * S;
+  const minX = Math.max(0, Math.floor(Math.min(x0, x1, x2)));
+  const maxX = Math.min(S - 1, Math.ceil(Math.max(x0, x1, x2)));
+  const minY = Math.max(0, Math.floor(Math.min(y0, y1, y2)));
+  const maxY = Math.min(S - 1, Math.ceil(Math.max(y0, y1, y2)));
+  const det = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2);
+  if (Math.abs(det) < 1e-9) return;              // degenerate in UV
+  const inv = 1 / det, eps = -1e-4;
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const px = x + 0.5, py = y + 0.5;
+      const a = ((y1 - y2) * (px - x2) + (x2 - x1) * (py - y2)) * inv;
+      const b = ((y2 - y0) * (px - x2) + (x0 - x2) * (py - y2)) * inv;
+      const g = 1 - a - b;
+      if (a >= eps && b >= eps && g >= eps) map[y * S + x] = id;
+    }
+  }
 }
 function fillCanvas(canvas, color) {
   const ctx = canvas.getContext("2d");

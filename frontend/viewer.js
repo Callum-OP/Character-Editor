@@ -84,24 +84,45 @@ function geometryFromObject(obj) {
   return out;
 }
 
+// Sniff the real 3D format from a file's leading bytes, so a mis-named file
+// (e.g. FBX bytes served under a ".glb" name from a project asset) still loads
+// with the right parser instead of being fed to the wrong one. Returns a format
+// key or null when the content isn't conclusively recognised (fall back to the
+// extension — this is the case for binary STL, which has no reliable magic).
+export function sniffFormat(buf) {
+  const b = new Uint8Array(buf);
+  const ascii = (n) => { let s = ""; for (let i = 0; i < n && i < b.length; i++) s += String.fromCharCode(b[i]); return s; };
+  if (ascii(18) === "Kaydara FBX Binary") return "fbx";               // binary FBX
+  if (b[0] === 0x67 && b[1] === 0x6c && b[2] === 0x54 && b[3] === 0x46) return "glb"; // 'glTF' magic
+  const bom = (b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf) ? 3 : 0;              // skip UTF-8 BOM
+  const head = (bom ? ascii(99).slice(3) : ascii(96)).trimStart();
+  if (head[0] === "{") return "gltf";                                 // JSON glTF
+  if (/^;?\s*FBX\b/i.test(head) || head.indexOf("FBXHeaderExtension") >= 0) return "fbx"; // ASCII FBX
+  if (/^ply\b/.test(head)) return "ply";
+  if (/^solid\b/.test(head)) return "stl";                            // ASCII STL
+  if (/^(v|vn|vt|f|o|g|mtllib|usemtl|#)\s/.test(head)) return "obj";
+  return null;
+}
+
 // Parse a File of any supported format into { surface, edges } geometry.
 // OBJ keeps real polygon edges; other formats get triangle wireframes.
 export async function geometryFromFile(file) {
-  const ext = file.name.split(".").pop().toLowerCase();
-  if (ext === "obj") return parseOBJ(await file.text());
   const buf = await file.arrayBuffer();
+  // Trust the content over the (possibly wrong) filename; fall back to extension.
+  const fmt = sniffFormat(buf) || file.name.split(".").pop().toLowerCase();
+  if (fmt === "obj") return parseOBJ(new TextDecoder().decode(buf));
   let object3d = null, geom = null;
-  if (ext === "glb" || ext === "gltf") {
+  if (fmt === "glb" || fmt === "gltf") {
     const gltf = await new Promise((res, rej) => new GLTFLoader().parse(buf, "", res, rej));
     object3d = gltf.scene;
-  } else if (ext === "fbx") {
+  } else if (fmt === "fbx") {
     object3d = new FBXLoader().parse(buf, "");
-  } else if (ext === "ply") {
+  } else if (fmt === "ply") {
     geom = new PLYLoader().parse(buf);
-  } else if (ext === "stl") {
+  } else if (fmt === "stl") {
     geom = new STLLoader().parse(buf);
   } else {
-    throw new Error("Unsupported format: " + ext);
+    throw new Error("Unsupported format: " + fmt);
   }
   if (!geom && object3d) { object3d.updateMatrixWorld(true); geom = geometryFromObject(object3d); }
   if (!geom) throw new Error("No mesh found in file.");

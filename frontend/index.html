@@ -132,7 +132,14 @@
       }));
       gallery.querySelectorAll("[data-up]").forEach((b) => b.addEventListener("click", async (ev) => {
         ev.stopPropagation();
-        if (window.Project) { await Project.pickAndUpload(b.getAttribute("data-up")); render(); }
+        if (!window.Project) return;
+        const pid = b.getAttribute("data-up");
+        const res = await Project.pickAndUpload(pid);
+        // Uploading a model into a project is an intent to work with it — make it
+        // the active project so the tools' "use current model" buttons target it
+        // (otherwise they'd keep loading whatever other project was active).
+        if (res) await Project.setActive(pid);
+        render();
       }));
       const pcNew = document.getElementById("pcNew");
       if (pcNew) pcNew.addEventListener("click", async () => {

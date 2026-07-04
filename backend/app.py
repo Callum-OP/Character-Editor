@@ -472,6 +472,13 @@ async def project_create(request: Request):
     return JSONResponse(_save_manifest(m))
 
 
+# These project responses change over time under a stable URL (a project's
+# "current" model is re-uploaded, results appended, etc.). Without an explicit
+# no-store the browser can heuristically cache them and serve a *stale* manifest
+# or, worse, the previous model's bytes from GET /current after a new upload.
+NO_STORE = {"Cache-Control": "no-store"}
+
+
 @app.get("/api/project")
 def project_list():
     out = []
@@ -488,7 +495,7 @@ def project_list():
                     "current": cur["name"] if cur else None,
                     "currentTool": cur["tool"] if cur else None})
     out.sort(key=lambda x: x["updated"], reverse=True)
-    return out
+    return JSONResponse(out, headers=NO_STORE)
 
 
 @app.get("/api/project/{pid}")
@@ -496,7 +503,7 @@ def project_get(pid: str):
     m = _load_manifest(pid)
     if not m:
         raise HTTPException(404, "no such project")
-    return m
+    return JSONResponse(m, headers=NO_STORE)
 
 
 @app.patch("/api/project/{pid}")
@@ -551,7 +558,7 @@ def project_current(pid: str):
     path = os.path.join(_proj_dir(pid), a["file"]) if a else None
     if not path or not os.path.isfile(path):
         raise HTTPException(404, "missing file")
-    return FileResponse(path, filename=a["name"])
+    return FileResponse(path, filename=a["name"], headers=NO_STORE)
 
 
 @app.get("/api/project/{pid}/assets/{aid}")
@@ -561,7 +568,7 @@ def project_asset(pid: str, aid: str):
     path = os.path.join(_proj_dir(pid), a["file"]) if a else None
     if not path or not os.path.isfile(path):
         raise HTTPException(404, "not found")
-    return FileResponse(path, filename=a["name"])
+    return FileResponse(path, filename=a["name"], headers=NO_STORE)
 
 
 # Serve the frontend (mounted last so /api/* wins).

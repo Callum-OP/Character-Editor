@@ -95,7 +95,7 @@
     },
 
     list: function () {
-      return fetch("/api/project").then(function (r) { return r.json(); }).catch(function () { return []; });
+      return fetch("/api/project", { cache: "no-store" }).then(function (r) { return r.json(); }).catch(function () { return []; });
     },
 
     create: function (name) {
@@ -133,7 +133,7 @@
     refresh: function () {
       var id = Project.id();
       if (!id) { state = { id: null, manifest: null }; sync(); return Promise.resolve(null); }
-      return fetch("/api/project/" + id).then(function (r) { if (!r.ok) throw 0; return r.json(); })
+      return fetch("/api/project/" + id, { cache: "no-store" }).then(function (r) { if (!r.ok) throw 0; return r.json(); })
         .then(function (m) { state = { id: id, manifest: m }; sync(); return m; })
         .catch(function () { Project._set(null); state = { id: null, manifest: null }; sync(); return null; });
     },
@@ -157,13 +157,56 @@
       }).catch(function (e) { if (window.toast) toast("Couldn't save to project: " + (e.message || e), "err"); });
     },
 
-    // Fetch the project's current model as a File, for use as a tool input.
+    // Save the *completed* model (the active project's current asset) into a
+    // brand-new project, WITHOUT touching or switching away from the project the
+    // user is working in. Used by the "Save as new project" affordance so a
+    // finished character can be branched off instead of overriding the original.
+    // opts: { name?, tool? }
+    forkToNew: function (opts) {
+      opts = opts || {};
+      return Project.getCurrentFile().then(function (file) {
+        if (!file) { if (window.toast) toast("No completed model to save yet — export/save it first.", "err"); return null; }
+        var pname = opts.name || Project.suggestForkName();
+        return fetch("/api/project", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: pname }),
+        }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+          .then(function (proj) {
+            var fd = new FormData();
+            fd.append("file", file);
+            fd.append("tool", opts.tool || "Completed");
+            fd.append("name", file.name || "model.glb");
+            return fetch("/api/project/" + proj.id + "/assets", { method: "POST", body: fd }).then(function (r) { return r.json(); });
+          }).then(function (res) {
+            // Active project deliberately left as-is; just surface the new one.
+            if (window.toast) toast("Saved completed model to new project “" + res.project.name + "”", "ok");
+            return res;
+          });
+      }).catch(function (e) { if (window.toast) toast("Couldn't save to new project: " + (e.message || e), "err"); });
+    },
+
+    // Default name for a forked project: the current model / project name + date.
+    suggestForkName: function () {
+      var cur = Project.current();
+      var base = (cur && cur.name ? cur.name.replace(/\.[^.]+$/, "") : (state.manifest && state.manifest.name)) || "Completed model";
+      var d = new Date(), p = function (n) { return (n < 10 ? "0" : "") + n; };
+      return base + " " + d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+    },
+
+    // Fetch the project's current model as a File, for use as a tool input. The
+    // filename is taken from the server's Content-Disposition (the asset's true
+    // name/extension) so downstream loaders pick the right parser; the client-side
+    // manifest name is only a fallback.
     getCurrentFile: function () {
       var id = Project.id(); if (!id) return Promise.resolve(null);
       var cur = Project.current();
-      return fetch("/api/project/" + id + "/current").then(function (r) { if (!r.ok) throw 0; return r.blob(); })
-        .then(function (blob) { return new File([blob], (cur && cur.name) || "model.glb"); })
-        .catch(function () { return null; });
+      return fetch("/api/project/" + id + "/current", { cache: "no-store" }).then(function (r) {
+        if (!r.ok) throw 0;
+        var name = (cur && cur.name) || "model.glb";
+        var cd = r.headers.get("Content-Disposition");
+        var m = cd && /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(cd);
+        if (m) name = decodeURIComponent(m[1].replace(/"/g, ""));
+        return r.blob().then(function (blob) { return new File([blob], name); });
+      }).catch(function () { return null; });
     },
 
     // Upload a user-chosen model file straight into a project (defaults to the
@@ -306,6 +349,11 @@
       b.classList.toggle("hidden", !cur);
       if (cur) b.title = "Load “" + cur.name + "” from " + (state.manifest ? "“" + state.manifest.name + "”" : "the project");
     });
+    // "Save as new project" only makes sense once there's a completed model.
+    document.querySelectorAll("[data-save-new]").forEach(function (b) {
+      b.classList.toggle("hidden", !cur);
+      if (cur) b.title = "Save “" + cur.name + "” into a brand-new project (leaves the current one untouched)";
+    });
   }
   document.addEventListener("click", function (e) {
     var b = e.target.closest && e.target.closest("[data-project-use]");
@@ -316,6 +364,36 @@
       else if (window.toast) toast("No current model in this project yet.", "err");
     });
   });
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("[data-save-new]");
+    if (!b) return;
+    e.preventDefault();
+    var name = prompt("Save completed model to a new project named:", Project.suggestForkName());
+    if (name === null) return;                // cancelled
+    var tool = b.getAttribute("data-save-new") || undefined;
+    Project.forkToNew({ name: name || undefined, tool: tool });
+  });
+
+  /* --------------------------------------------------- format sniffing ----- */
+  // Detect a 3D file's real format from its leading bytes, so a mis-named asset
+  // (e.g. FBX bytes under a ".glb" name) is routed to the right parser / backend
+  // hint instead of blowing up. Returns a format key or null when inconclusive
+  // (caller should fall back to the filename extension). Mirrors viewer.js's
+  // module-scoped copy so classic (non-module) scripts like rig.js can use it.
+  window.sniffModelFormat = function (buf) {
+    var b = new Uint8Array(buf);
+    var ascii = function (n) { var s = ""; for (var i = 0; i < n && i < b.length; i++) s += String.fromCharCode(b[i]); return s; };
+    if (ascii(18) === "Kaydara FBX Binary") return "fbx";
+    if (b[0] === 0x67 && b[1] === 0x6c && b[2] === 0x54 && b[3] === 0x46) return "glb";
+    var bom = (b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf) ? 3 : 0;
+    var head = (bom ? ascii(99).slice(3) : ascii(96)).replace(/^\s+/, "");
+    if (head[0] === "{") return "gltf";
+    if (/^;?\s*FBX\b/i.test(head) || head.indexOf("FBXHeaderExtension") >= 0) return "fbx";
+    if (/^ply\b/.test(head)) return "ply";
+    if (/^solid\b/.test(head)) return "stl";
+    if (/^(v|vn|vt|f|o|g|mtllib|usemtl|#)\s/.test(head)) return "obj";
+    return null;
+  };
 
   /* -------------------------------------------------------------- toasts --- */
   function ensureToastHost() {
@@ -347,10 +425,23 @@
   document.addEventListener("input", function (e) { if (e.target && e.target.type === "range") paintRange(e.target); });
 
   /* ---------------------------------------------------------------- init --- */
+  // Re-sync the active project when a left-open tab/window regains focus, so its
+  // chip and "use current model" buttons reflect changes made on another page
+  // (e.g. uploading a model into the project from the hub) instead of going
+  // stale until reload.
+  var _refreshing = false;
+  function refreshOnReturn() {
+    if (_refreshing || document.hidden || !Project.id()) return;
+    _refreshing = true;
+    Project.refresh().then(dispatchChange).catch(function () {}).then(function () { _refreshing = false; });
+  }
+
   function init() {
     buildAppbar();
     paintAll(document);
     Project.refresh();
+    window.addEventListener("focus", refreshOnReturn);
+    document.addEventListener("visibilitychange", refreshOnReturn);
     var mo = new MutationObserver(function (muts) {
       for (var i = 0; i < muts.length; i++) {
         muts[i].addedNodes.forEach(function (n) {

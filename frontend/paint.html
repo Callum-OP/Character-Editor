@@ -91,6 +91,11 @@
         <span>Spacing <em id="spacing-val">12%</em></span>
         <input type="range" id="brush-spacing" min="2" max="60" step="1" value="12" />
       </label>
+      <label class="check hidden" id="fill-seam-row" style="margin-top:4px">
+        <input type="checkbox" id="fill-respect-seams" /> Fill stops at UV seams
+      </label>
+      <small class="hidden" id="fill-seam-hint">On: the bucket fill stays inside the
+        UV island you click — a seam separating two areas keeps them independent.</small>
     </details>
 
     <details class="grp" open>
@@ -149,6 +154,7 @@
       <button class="seg" id="export-btn" style="width:100%;margin-bottom:6px">⬇ Export texture (PNG)</button>
       <button class="seg" id="glb-btn" style="width:100%;margin-bottom:6px">⬇ Download model (GLB)</button>
       <button class="download" id="save-btn">◆ Save to project</button>
+      <button type="button" data-save-new="Paint" class="seg hidden" style="width:100%;margin-top:6px">＋ Save as new project</button>
     </details>
 
     <footer>

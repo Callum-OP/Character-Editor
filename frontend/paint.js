@@ -20,6 +20,7 @@ import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
 import { ViewHelper } from "three/addons/helpers/ViewHelper.js";
 import { PaintSurface, BLEND_MODES } from "./paintlayer.js";
+import { sniffFormat } from "./viewer.js";
 
 // ---------------------------------------------------------------------------
 // State
@@ -34,6 +35,7 @@ const brush = {
   spacing: 0.12,
 };
 const mirror = { on: false, axis: 0 };   // axis 0/1/2 = x/y/z
+let fillRespectSeams = false;             // fill tool: keep inside the UV island
 let textureRes = 1024;
 let baseColor = "#d8d3c8";
 
@@ -208,7 +210,7 @@ canvas.addEventListener("pointerdown", (e) => {
   if (brush.tool === "fill") {
     beginUndoGroup();
     recordSurface(primary.surface);
-    primary.surface.floodFill(primary.uv, brush);
+    primary.surface.floodFill(primary.uv, brush, { respectSeams: fillRespectSeams });
     commitUndoGroup();
     queuePreview();
     return;
@@ -376,12 +378,11 @@ function makePrimitive(kind) {
 // --- File loading (single/multi-file glTF, plus obj/fbx/ply/stl) ------------
 const objLoader = new OBJLoader();
 
-function loadFiles(fileList) {
+async function loadFiles(fileList) {
   const files = [...fileList];
   if (!files.length) return;
   const isModel = (n) => /\.(glb|gltf|vrm|fbx|obj|ply|stl)$/i.test(n);
-  const main = files.find((f) => isModel(f.name));
-  if (!main) { toast("Unsupported file. Use .glb/.gltf/.fbx/.obj/.ply/.stl", "err"); return; }
+  const main = files.find((f) => isModel(f.name)) || files[0];
 
   showLoading(true);
   const blobs = new Map();
@@ -395,22 +396,30 @@ function loadFiles(fileList) {
     return blobs.get(base) || url;
   });
 
-  const name = main.name.toLowerCase();
   const url = blobs.get(main.name);
   const done = (root) => { installModel(root); showLoading(false); cleanup(); };
   const fail = (err) => { console.error(err); toast("✕ Failed to load model.", "err"); showLoading(false); cleanup(); };
   const wrapGeom = (geom) => { const m = new THREE.Mesh(geom, new THREE.MeshStandardMaterial()); m.name = main.name; const g = new THREE.Group(); g.add(m); return g; };
 
-  if (name.endsWith(".glb") || name.endsWith(".gltf") || name.endsWith(".vrm")) {
+  // Pick the loader from the file's actual bytes, not its (possibly wrong) name —
+  // a project asset can arrive as FBX under a ".glb" name, which would otherwise
+  // be fed to the glTF (JSON) loader and blow up. Fall back to the extension.
+  let fmt;
+  try { fmt = sniffFormat(await main.slice(0, 128).arrayBuffer()); } catch { fmt = null; }
+  fmt = fmt || main.name.split(".").pop().toLowerCase();
+
+  if (fmt === "glb" || fmt === "gltf" || fmt === "vrm") {
     new GLTFLoader(manager).load(url, (g) => done(g.scene), undefined, fail);
-  } else if (name.endsWith(".fbx")) {
+  } else if (fmt === "fbx") {
     new FBXLoader(manager).load(url, (obj) => done(obj), undefined, fail);
-  } else if (name.endsWith(".obj")) {
+  } else if (fmt === "obj") {
     main.text().then((t) => { try { done(objLoader.parse(t)); } catch (err) { fail(err); } }, fail);
-  } else if (name.endsWith(".ply")) {
+  } else if (fmt === "ply") {
     main.arrayBuffer().then((b) => { const g = new PLYLoader().parse(b); g.computeVertexNormals(); done(wrapGeom(g)); }, fail);
-  } else if (name.endsWith(".stl")) {
+  } else if (fmt === "stl") {
     main.arrayBuffer().then((b) => { const g = new STLLoader().parse(b); g.computeVertexNormals(); done(wrapGeom(g)); }, fail);
+  } else {
+    fail(new Error("Unsupported format: " + fmt));
   }
 }
 
@@ -549,6 +558,12 @@ function setTool(tool) {
   // Flow only meaningfully applies to the deposit brushes.
   const flowRow = document.getElementById("flow-row");
   flowRow.classList.toggle("hidden", !["paint", "airbrush", "erase"].includes(tool));
+  // Seam option only applies to the bucket fill.
+  const isFill = tool === "fill";
+  const seamRow = document.getElementById("fill-seam-row");
+  const seamHint = document.getElementById("fill-seam-hint");
+  if (seamRow) seamRow.classList.toggle("hidden", !isFill);
+  if (seamHint) seamHint.classList.toggle("hidden", !isFill);
 }
 
 function bindRange(id, valId, apply, fmt) {
@@ -587,6 +602,9 @@ function setupUI() {
   bindRange("brush-hardness", "hardness-val", (v) => { brush.hardness = v / 100; }, (v) => `${v}%`);
   bindRange("brush-flow", "flow-val", (v) => { brush.flow = v / 100; }, (v) => `${v}%`);
   bindRange("brush-spacing", "spacing-val", (v) => { brush.spacing = v / 100; }, (v) => `${v}%`);
+
+  // Fill: respect UV seams
+  document.getElementById("fill-respect-seams").addEventListener("change", (e) => { fillRespectSeams = e.target.checked; });
 
   // Mirror
   document.getElementById("mirror-on").addEventListener("change", (e) => { mirror.on = e.target.checked; updateSymPlane(); });

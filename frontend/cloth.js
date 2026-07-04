@@ -214,7 +214,11 @@ function rebuildGarment() {
   if (clothMesh) { scene.remove(clothMesh); clothMesh.geometry.dispose(); }
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.BufferAttribute(sim.pos, 3));
-  if (spec.uv) g.setAttribute("uv", new THREE.BufferAttribute(spec.uv, 2));
+  // Always give the garment a UV set so the exported mesh can be painted. Preset
+  // patterns carry their own grid UVs; a draped *custom* mesh may have none (e.g.
+  // a retopo/rigged model with no UVs), so fall back to a cylindrical unwrap.
+  const uv = spec.uv || cylindricalUV(sim.pos, spec.count);
+  g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
   g.setIndex(new THREE.BufferAttribute(spec.indices, 1));
   g.computeVertexNormals();
   clothMesh = new THREE.Mesh(g, clothMat);
@@ -287,6 +291,27 @@ $("fitScale").addEventListener("input", () => $("fitScaleVal").textContent = (+$
 $("fitScale").addEventListener("change", rebuildGarment);
 $("fitOffset").addEventListener("input", () => $("fitOffsetVal").textContent = (+$("fitOffset").value).toFixed(2));
 $("fitOffset").addEventListener("change", rebuildGarment);
+
+// Fallback UV unwrap for a garment that arrived without any: wrap the texture
+// around the body's vertical axis (u = angle about the centroid, v = height).
+// Good enough to paint a draped tube/sheet; presets keep their own grid UVs.
+function cylindricalUV(pos, count) {
+  let minY = Infinity, maxY = -Infinity, cx = 0, cz = 0;
+  for (let i = 0; i < count; i++) {
+    const y = pos[3 * i + 1];
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+    cx += pos[3 * i]; cz += pos[3 * i + 2];
+  }
+  cx /= count || 1; cz /= count || 1;
+  const h = (maxY - minY) || 1;
+  const uv = new Float32Array(count * 2);
+  for (let i = 0; i < count; i++) {
+    const ang = Math.atan2(pos[3 * i + 2] - cz, pos[3 * i] - cx);   // -π..π
+    uv[2 * i] = (ang + Math.PI) / (2 * Math.PI);                     // 0..1 around
+    uv[2 * i + 1] = (pos[3 * i + 1] - minY) / h;                     // 0..1 up
+  }
+  return uv;
+}
 
 // ------------------------------------------------------------------- fabric
 const PRESETS = {

@@ -209,9 +209,12 @@ async function startPrep() {
   try {
     let url = "/api/rig/prep", opts = { method: "POST" };
     if (selectedFile) {
-      const ext = selectedFile.name.split(".").pop().toLowerCase();
+      const buf = await selectedFile.arrayBuffer();
+      // Hint the backend with the real format (sniffed), not a possibly-wrong name.
+      const sniff = window.sniffModelFormat && window.sniffModelFormat(buf);
+      const ext = sniff || selectedFile.name.split(".").pop().toLowerCase();
       url += "?ext=" + encodeURIComponent(ext);
-      opts.body = await selectedFile.arrayBuffer();
+      opts.body = buf;
       opts.headers = { "Content-Type": "application/octet-stream" };
     } else {
       url += "?test=1";

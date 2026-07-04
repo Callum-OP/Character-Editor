@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { sniffFormat } from "./viewer.js";
 
 // ---- expression presets: named combinations of ARKit blendshapes -----------
 const PRESETS = {
@@ -121,10 +122,12 @@ el("run").addEventListener("click", async () => {
   el("exprPanel").classList.add("hidden");
   try {
     // phase 1: prep (head-only) — auto-detect face markers + front view
-    const ext = file.name.split(".").pop().toLowerCase();
+    const buf = await file.arrayBuffer();
+    // Hint the backend with the real format (sniffed), not a possibly-wrong name.
+    const ext = sniffFormat(buf) || file.name.split(".").pop().toLowerCase();
     const prep = await (await fetch("/api/rig/prep?headOnly=1&ext=" + encodeURIComponent(ext),
       { method: "POST", headers: { "Content-Type": "application/octet-stream" },
-        body: await file.arrayBuffer() })).json();
+        body: buf })).json();
     if (prep.error) throw new Error(prep.error);
     // phase 2: build face shape keys
     const build = await (await fetch("/api/rig/build", {
