@@ -334,3 +334,32 @@ downloaded GLB carries all 52 shape keys, ready for any ARKit-driven pipeline
 
 Verified: the generated GLB contains Basis + 52 correctly-named ARKit morph
 targets, driven live in the browser.
+
+---
+
+# Tool 7 — Mesh Cleanup / LOD
+
+Two mesh-hygiene jobs every other tool assumes have already been done, driven by
+Blender headless (`backend/blender_clean.py`, engine layer `backend/clean.py`).
+
+**Cleanup** — diagnose and repair an imported mesh. It reports before/after
+diagnostics (vertex/face count, non-manifold edges, boundary/hole edges, loose
+vertices) and applies the fixes you enable:
+- **Merge distance** — weld duplicate/seam vertices closer than the threshold
+  (`bmesh` remove-doubles). Fixes the split-vertex non-manifoldness that makes
+  QuadriFlow and the wrap/cloth tools misbehave.
+- **Recalculate normals (outside)**, **fill holes**, **delete loose geometry**,
+  **remove degenerate faces**, and an optional **flip normals**.
+
+**LOD** — decimate the model into game-ready low-poly variants with Blender's
+Decimate (collapse) modifier. Give a list of collapse ratios (e.g.
+`0.5,0.25,0.125`) to emit one mesh per level, or a single **target face count**.
+**Preserve UVs** and **preserve open boundaries** keep texture seams and silhouette
+edges intact through the collapse. Each level previews in the viewer, downloads on
+its own, and can be pushed back to the project as the current model.
+
+**Formats:** imports OBJ / GLB / glTF / FBX / PLY / STL; exports the same set (the
+viewer always uses an OBJ copy so the wireframe is exact).
+
+**API:** `POST /api/clean` (repair + diagnostics), `POST /api/lod` (decimated
+levels).

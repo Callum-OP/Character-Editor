@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 import retopo
 import wrap
 import rig
+import clean
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORK = os.path.join(HERE, "work")
@@ -117,6 +118,122 @@ async def retopo_endpoint(
         "view_url": f"/api/download/{job_id}/result.obj",
         "download_url": f"/api/download/{job_id}/{out_name}",
         "download_name": out_name,
+    })
+
+
+@app.post("/api/clean")
+async def clean_endpoint(
+    file: UploadFile = File(...),
+    out_format: str = Form("glb"),
+    merge_dist: float = Form(0.0001),
+    fix_normals: bool = Form(True),
+    fill_holes: bool = Form(False),
+    delete_loose: bool = Form(True),
+    degenerate: bool = Form(True),
+    flip: bool = Form(False),
+):
+    in_ext = os.path.splitext(file.filename or "")[1].lower()
+    if in_ext not in SUPPORTED_IN:
+        raise HTTPException(400, f"Unsupported input format '{in_ext}'. "
+                                 f"Allowed: {sorted(SUPPORTED_IN)}")
+    out_ext = "." + out_format.lower().lstrip(".")
+    if out_ext not in SUPPORTED_OUT:
+        raise HTTPException(400, f"Unsupported output format '{out_ext}'.")
+    merge_dist = max(0.0, min(float(merge_dist), 1.0))
+
+    job_id = uuid.uuid4().hex
+    job_dir = os.path.join(WORK, job_id)
+    os.makedirs(job_dir, exist_ok=True)
+    in_path = os.path.join(job_dir, "input" + in_ext)
+    view_path = os.path.join(job_dir, "result.obj")
+    out_name = "result" + out_ext
+    out_path = os.path.join(job_dir, out_name)
+    with open(in_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    try:
+        data = clean.run_clean(in_path, out_path, view_path, {
+            "merge_dist": merge_dist, "fix_normals": fix_normals,
+            "fill_holes": fill_holes, "delete_loose": delete_loose,
+            "degenerate": degenerate, "flip": flip,
+        })
+        if out_ext == ".obj":
+            out_path = view_path
+            out_name = "result.obj"
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+    return JSONResponse({
+        "job_id": job_id,
+        "stats": data,
+        "view_url": f"/api/download/{job_id}/result.obj",
+        "download_url": f"/api/download/{job_id}/{out_name}",
+        "download_name": out_name,
+    })
+
+
+@app.post("/api/lod")
+async def lod_endpoint(
+    file: UploadFile = File(...),
+    out_format: str = Form("glb"),
+    ratios: str = Form("0.5,0.25,0.125"),
+    target_faces: int = Form(0),
+    preserve_uv: bool = Form(True),
+    preserve_boundary: bool = Form(True),
+):
+    in_ext = os.path.splitext(file.filename or "")[1].lower()
+    if in_ext not in SUPPORTED_IN:
+        raise HTTPException(400, f"Unsupported input format '{in_ext}'.")
+    out_ext = "." + out_format.lower().lstrip(".")
+    if out_ext not in SUPPORTED_OUT:
+        raise HTTPException(400, f"Unsupported output format '{out_ext}'.")
+
+    ratio_list = []
+    for tok in ratios.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        try:
+            r = float(tok)
+        except ValueError:
+            raise HTTPException(400, "ratios must be comma-separated numbers")
+        if 0.0 < r <= 1.0:
+            ratio_list.append(r)
+    if not ratio_list and target_faces <= 0:
+        raise HTTPException(400, "give at least one ratio in (0,1] or a target face count")
+    target_faces = max(0, min(int(target_faces), 5000000))
+
+    job_id = uuid.uuid4().hex
+    job_dir = os.path.join(WORK, job_id)
+    os.makedirs(job_dir, exist_ok=True)
+    in_path = os.path.join(job_dir, "input" + in_ext)
+    with open(in_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    try:
+        data = clean.run_lod(in_path, job_dir, ratio_list, out_ext=out_ext,
+                             target_faces=target_faces,
+                             preserve_uv=preserve_uv,
+                             preserve_boundary=preserve_boundary)
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+    levels = []
+    for lv in data.get("levels", []):
+        levels.append({
+            "level": lv["level"],
+            "ratio": lv["ratio"],
+            "faces": lv["faces"],
+            "vertices": lv["vertices"],
+            "view_url": f"/api/download/{job_id}/{lv['view']}",
+            "download_url": f"/api/download/{job_id}/{lv['file']}",
+            "download_name": f"lod{lv['level']}{out_ext}",
+        })
+
+    return JSONResponse({
+        "job_id": job_id,
+        "source": data.get("source"),
+        "levels": levels,
     })
 
 

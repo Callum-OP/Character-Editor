@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mesh Cleanup / LOD — Character Editor</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="/shell.js" defer></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body class="tool">
+  <div class="workspace">
+  <aside id="panel">
+    <h1>Mesh Cleanup<br/>/ LOD</h1>
+    <p class="sub">Repair a mesh (holes, doubles, normals) or generate
+       game-ready low-poly LOD levels.</p>
+
+    <div id="engine" class="engine">Detecting engine&hellip;</div>
+
+    <label class="field">
+      <span>Model file</span>
+      <input type="file" id="file" accept=".obj,.glb,.gltf,.fbx,.ply,.stl" />
+      <small>OBJ, GLB/glTF, FBX, PLY, STL</small>
+    </label>
+
+    <button type="button" data-project-use class="hidden">Use current project model</button>
+
+    <label class="field">
+      <span>Mode</span>
+      <select id="mode">
+        <option value="clean" selected>Cleanup — diagnose &amp; repair</option>
+        <option value="lod">LOD — decimate to low-poly levels</option>
+      </select>
+    </label>
+
+    <!-- Cleanup controls -->
+    <fieldset id="cleanFields" class="field">
+      <span>Cleanup operations</span>
+      <label class="field">
+        <span>Merge distance: <b id="mergeVal">0.0001</b></span>
+        <input type="range" id="mergeDist" min="0" max="0.01" step="0.0001" value="0.0001" />
+        <small>Weld vertices closer than this (0 disables). Fixes split seams.</small>
+      </label>
+      <label class="check"><input type="checkbox" id="fixNormals" checked /> Recalculate normals (outside)</label>
+      <label class="check"><input type="checkbox" id="deleteLoose" checked /> Delete loose geometry</label>
+      <label class="check"><input type="checkbox" id="degenerate" checked /> Remove degenerate faces</label>
+      <label class="check"><input type="checkbox" id="fillHoles" /> Fill holes</label>
+      <label class="check"><input type="checkbox" id="flip" /> Flip all normals</label>
+    </fieldset>
+
+    <!-- LOD controls -->
+    <fieldset id="lodFields" class="field hidden">
+      <span>LOD levels</span>
+      <label class="field">
+        <span>Collapse ratios (comma-separated)</span>
+        <input type="text" id="ratios" value="0.5,0.25,0.125" />
+        <small>Each ratio keeps that fraction of faces. One file per level.</small>
+      </label>
+      <label class="field">
+        <span>Or single target face count</span>
+        <input type="number" id="targetFaces" min="0" step="100" value="0" />
+        <small>If &gt; 0 this wins — one level at roughly this many faces.</small>
+      </label>
+      <label class="check"><input type="checkbox" id="preserveUv" checked /> Preserve UVs</label>
+      <label class="check"><input type="checkbox" id="preserveBoundary" checked /> Preserve open boundaries</label>
+    </fieldset>
+
+    <label class="field">
+      <span>Download format</span>
+      <select id="outFormat">
+        <option value="glb" selected>GLB</option>
+        <option value="obj">OBJ</option>
+        <option value="gltf">glTF</option>
+        <option value="fbx">FBX</option>
+        <option value="ply">PLY</option>
+        <option value="stl">STL</option>
+      </select>
+    </label>
+
+    <button id="run" disabled>Run</button>
+    <div id="status" class="status"></div>
+
+    <div id="stats" class="stats hidden"></div>
+    <a id="download" class="download hidden" download>Download result</a>
+    <div id="lodList" class="stats hidden"></div>
+    <button type="button" data-save-new="Cleanup" class="seg hidden">＋ Save as new project</button>
+
+    <footer>
+      <p>View:
+        <button class="seg active" data-view="result">Result</button>
+        <button class="seg" data-view="original">Original</button>
+      </p>
+      <p>
+        <label class="check"><input type="checkbox" id="wire" /> Wireframe</label>
+        <label class="check"><input type="checkbox" id="shade" checked /> Shaded</label>
+      </p>
+    </footer>
+  </aside>
+
+  <main id="stage">
+    <div id="hint">Load a model to begin.</div>
+    <canvas id="view"></canvas>
+  </main>
+  </div>
+
+  <script type="module" src="clean.js"></script>
+</body>
+</html>

@@ -336,7 +336,8 @@ function setMode(mode) {
   faceModeBtn.classList.toggle("active", mode === "face");
   handsModeBtn.classList.toggle("active", mode === "hands");
   handSideRow.classList.toggle("hidden", mode !== "hands");
-  editorImg.src = mode === "hands" ? handViews[handSide] : frontUrl;
+  const nextSrc = mode === "hands" ? (handViews && handViews[handSide]) : frontUrl;
+  if (nextSrc) editorImg.src = nextSrc;   // avoid requesting "/null" before a model is prepped
   const overlay = mode === "face" || mode === "hands";
   editorHint.textContent =
     mode === "hands" ? "Drag each dot onto the real fingertip · Mirror copies to the other hand · scroll to zoom."
