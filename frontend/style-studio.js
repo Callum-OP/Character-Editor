@@ -7,7 +7,7 @@ import { PLYLoader } from "three/addons/loaders/PLYLoader.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
 import { ViewHelper } from "three/addons/helpers/ViewHelper.js";
-import { sniffFormat } from "./viewer.js";
+import { sniffFormat, attachSmoothZoom } from "./viewer.js";
 
 // --------------------------------------------------------------------------- //
 // scene setup (mirrors paint.js' renderer/scene/lights/gizmo pattern)
@@ -30,6 +30,12 @@ camera.position.set(0, 1.2, 4);
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
+// Bound the dolly so wheel-zoom can't drive the camera onto its target (distance
+// 0 degenerates the view and blanks the canvas). Model frames to ~2.2 units.
+controls.minDistance = 0.4;
+controls.maxDistance = 20;
+controls.enableZoom = false;                 // replaced by eased smooth zoom
+const tickZoom = attachSmoothZoom(camera, controls, canvas);
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x30343c, 1.0));
 const keyLight = new THREE.DirectionalLight(0xffffff, 2.0);
@@ -69,6 +75,7 @@ function tick() {
   if (document.getElementById("spin").checked && modelRoot) pivot.rotation.y += delta * 0.6;
   if (viewHelper.animating) viewHelper.update(delta);
   controls.enabled = !viewHelper.animating;
+  tickZoom();
   controls.update();
   renderer.render(scene, camera);
   viewHelper.center.copy(controls.target);
@@ -249,35 +256,87 @@ function matcapTex(kind) {
   return tex;
 }
 
-function origMap(t) {
-  const m = (t.orig && t.orig.map) ? t.orig.map : null;
-  if (!m || !m.isTexture) return null;
-  // A map needs a UV attribute to sample against; arbitrary VRM/glTF meshes
-  // don't always have one, and a map without UVs produces a broken shader
-  // ("uvundefined" / MAP_UV). Drop the map in that case and fall back to color.
-  const attrs = t.mesh.geometry.attributes;
-  if (!attrs || !attrs.uv) return null;
-  // Sanitize fields three's shader assembler reads directly, in case the model's
-  // loader left them undefined (channel -> MAP_UV, matrix -> transform uniform).
-  if (typeof m.channel !== "number") m.channel = 0;
-  if (!m.matrix) m.matrix = new THREE.Matrix3();
-  return m;
+// A mesh's original material(s) as a flat list. A multi-material mesh (e.g. a
+// shirt whose parts each have their own colour) carries a material array whose
+// slots line up with the geometry's draw groups.
+function origMaterialList(t) {
+  return Array.isArray(t.orig) ? t.orig : [t.orig];
+}
+
+// True only if a texture actually has a decoded image to sample. A glTF/VRM
+// texture whose source was external, undecodable, or 404'd still exists as a
+// THREE.Texture object but has no image — sampling it returns black, which is
+// what paints "random" parts (hands, etc.) black once textures are on.
+function texHasImage(t) {
+  const img = t && t.image;
+  if (!img) return false;
+  return !!(img.width || img.videoWidth || img.data || img.length ||
+            (img.mipmaps && img.mipmaps.length));
+}
+
+// Resolve the "kept" look for one original material slot: its texture (only if
+// the geometry has UVs *and* the texture has a real image), and its own base
+// colour so an untextured-but-coloured part keeps that colour.
+// Colours are copied in the renderer's linear working space (no hex round-trip),
+// so they match the source exactly rather than drifting darker/lighter.
+function keptLook(src, geom, base) {
+  const hadMap = !!(src && src.map && src.map.isTexture);
+  const uv = geom.attributes && geom.attributes.uv;
+  const map = (hadMap && uv && texHasImage(src.map)) ? src.map : null;
+  if (map) {
+    // Sanitize fields three's shader assembler reads directly (channel -> MAP_UV,
+    // matrix -> transform uniform), in case the loader left them undefined.
+    if (typeof map.channel !== "number") map.channel = 0;
+    if (!map.matrix) map.matrix = new THREE.Matrix3();
+  }
+  const color = new THREE.Color(base);
+  if (map) {
+    color.setHex(0xffffff);                     // let the texture show unmodified
+  } else if (hadMap) {
+    // Slot relied on a texture we couldn't decode, so its own colour factor is
+    // usually a black placeholder — showing it would render the part black.
+    // Fall back to the Base colour picker instead of a black blob.
+  } else if (src && src.color && src.color.isColor) {
+    color.copy(src.color);                       // genuinely untextured, coloured part
+  }
+  // Keep baked-in per-vertex colours if the mesh actually carries them.
+  const vertexColors = !!(src && src.vertexColors && geom.attributes && geom.attributes.color);
+  return { map, color, vertexColors };
+}
+
+// The per-slot look for a style: keep the model's own colour/texture when the
+// "Keep …" toggle is on, otherwise a flat fill from the Base colour picker.
+function lookForSlot(useMap, src, geom, base) {
+  if (!useMap) return { map: null, color: new THREE.Color(base), vertexColors: false };
+  return keptLook(src, geom, base);
 }
 
 function buildMaterial(style, t) {
   const base = colorHex("base-color");
   const useMap = checked("use-map");
-  const map = useMap ? origMap(t) : null;
-  switch (style) {
-    case "toon":
-      return new THREE.MeshToonMaterial({
-        color: map ? 0xffffff : base, map,
-        gradientMap: gradientTex(parseInt(val("tone-steps"), 10)),
+  // toon / flat keep the model's own colour+texture per material slot, so a
+  // multi-material mesh keeps each part's colour. Return an array matching the
+  // geometry's draw groups (a lone slot stays a single material).
+  if (style === "toon" || style === "flat") {
+    const geom = t.mesh.geometry;
+    const mats = origMaterialList(t).map((src) => {
+      const look = lookForSlot(useMap, src, geom, base);
+      if (style === "toon") {
+        return new THREE.MeshToonMaterial({
+          color: look.color, map: look.map, vertexColors: look.vertexColors,
+          gradientMap: gradientTex(parseInt(val("tone-steps"), 10)),
+        });
+      }
+      return new THREE.MeshStandardMaterial({
+        color: look.color, map: look.map, vertexColors: look.vertexColors,
+        roughness: 0.85, metalness: 0.0, flatShading: true,
       });
+    });
+    return mats.length === 1 ? mats[0] : mats;
+  }
+  switch (style) {
     case "matcap":
       return new THREE.MeshMatcapMaterial({ matcap: matcapTex(val("matcap-select")) });
-    case "flat":
-      return new THREE.MeshStandardMaterial({ color: map ? 0xffffff : base, map, roughness: 0.85, metalness: 0.0, flatShading: true });
     case "clay":
       return new THREE.MeshStandardMaterial({ color: base, roughness: 1.0, metalness: 0.0 });
     case "wireframe":
@@ -436,9 +495,14 @@ function buildExportRoot() {
   styleTargets.forEach((t) => {
     const rel = new THREE.Matrix4().copy(inv).multiply(t.mesh.matrixWorld);
     const geo = bakedWorldGeometry(t.mesh);
-    const map = useMap ? origMap(t) : null;
-    // portable unlit material: flat cartoon fill (KHR_materials_unlit on export)
-    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: map ? 0xffffff : base, map }));
+    // portable unlit material per slot: flat cartoon fill (KHR_materials_unlit on
+    // export), keeping each material's own colour/texture so multi-material
+    // meshes export with their real colours rather than one flat fill.
+    const mats = origMaterialList(t).map((src) => {
+      const look = lookForSlot(useMap, src, geo, base);
+      return new THREE.MeshBasicMaterial({ color: look.color, map: look.map, vertexColors: look.vertexColors });
+    });
+    const mesh = new THREE.Mesh(geo, mats.length === 1 ? mats[0] : mats);
     mesh.name = t.mesh.name || "mesh";
     mesh.applyMatrix4(rel);
     root.add(mesh);

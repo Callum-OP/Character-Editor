@@ -20,7 +20,7 @@ import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
 import { ViewHelper } from "three/addons/helpers/ViewHelper.js";
 import { PaintSurface, BLEND_MODES } from "./paintlayer.js";
-import { sniffFormat } from "./viewer.js";
+import { sniffFormat, attachSmoothZoom } from "./viewer.js";
 
 // ---------------------------------------------------------------------------
 // State
@@ -68,6 +68,12 @@ camera.position.set(0, 1.2, 4);
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
+// Bound the dolly so wheel-zoom can't drive the camera onto its target (distance
+// 0 degenerates the view and blanks the canvas). Model frames to ~2 units.
+controls.minDistance = 0.4;
+controls.maxDistance = 20;
+controls.enableZoom = false;                 // replaced by eased smooth zoom
+const tickZoom = attachSmoothZoom(camera, controls, canvas);
 // Left button paints; orbit with right, pan with middle.
 controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
 controls.touches = { ONE: null, TWO: THREE.TOUCH.DOLLY_PAN };
@@ -488,6 +494,7 @@ function tick() {
   const delta = clock.getDelta();
   if (viewHelper.animating) viewHelper.update(delta);
   controls.enabled = !viewHelper.animating && !isPainting;
+  tickZoom();
   controls.update();
   drawPreview();
   renderer.render(scene, camera);

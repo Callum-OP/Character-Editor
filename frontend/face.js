@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { sniffFormat } from "./viewer.js";
+import { sniffFormat, attachSmoothZoom } from "./viewer.js";
 
 // ---- expression presets: named combinations of ARKit blendshapes -----------
 const PRESETS = {
@@ -29,6 +29,11 @@ const camera = new THREE.PerspectiveCamera(35, 1, 0.001, 100);
 camera.position.set(0, 0.1, 1.2);
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
+// Keep wheel-zoom from dollying onto the target (distance 0 blanks the view).
+controls.minDistance = 0.15;
+controls.maxDistance = 12;
+controls.enableZoom = false;                 // replaced by eased smooth zoom
+const tickZoom = attachSmoothZoom(camera, controls, canvas);
 scene.add(new THREE.HemisphereLight(0xffffff, 0x404050, 1.2));
 const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(2, 3, 4); scene.add(key);
 const rim = new THREE.DirectionalLight(0x88aaff, 0.6); rim.position.set(-3, 1, -2); scene.add(rim);
@@ -45,7 +50,7 @@ function resize() {
     renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
   }
 }
-(function loop() { resize(); controls.update(); renderer.render(scene, camera); requestAnimationFrame(loop); })();
+(function loop() { resize(); tickZoom(); controls.update(); renderer.render(scene, camera); requestAnimationFrame(loop); })();
 
 function frame(obj) {
   const box = new THREE.Box3().setFromObject(obj);

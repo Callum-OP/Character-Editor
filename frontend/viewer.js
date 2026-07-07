@@ -129,18 +129,56 @@ export async function geometryFromFile(file) {
   return { surface: geom, edges: new THREE.WireframeGeometry(geom) };
 }
 
+// Smooth, damped wheel-zoom for an OrbitControls camera.
+//
+// Three's OrbitControls applies wheel-zoom in a single discrete step — its
+// `enableDamping` smooths rotation and pan but NOT the dolly, so every notch
+// snaps instantly ("jumps with no gradual movement"). This replaces that with a
+// per-frame eased dolly: the wheel nudges a *target* distance, and each frame
+// the camera glides a fraction of the way there.
+//
+// Wire-up: set `controls.enableZoom = false`, call this once, then call the
+// returned `tick()` every frame *before* `controls.update()`.
+export function attachSmoothZoom(camera, controls, dom, { factor = 1.2, ease = 0.2 } = {}) {
+  const target = controls.target;
+  let goal = camera.position.distanceTo(target) || 1;
+  let applied = goal;
+  const tmp = new THREE.Vector3();
+  const clamp = (d) => Math.min(controls.maxDistance, Math.max(controls.minDistance, d));
+
+  dom.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    // Normalise delta across mouse wheel (px) / trackpad / line & page modes,
+    // then map roughly one notch (~120) to one `factor` step.
+    let d = e.deltaY;
+    if (e.deltaMode === 1) d *= 16;          // lines -> px
+    else if (e.deltaMode === 2) d *= 100;    // pages -> px
+    const step = Math.max(-3, Math.min(3, d / 120));
+    goal = clamp(goal * Math.pow(factor, step));
+  }, { passive: false });
+
+  return function tickZoom() {
+    const cur = camera.position.distanceTo(target);
+    // If something moved the camera distance out from under us (a tool framing a
+    // freshly loaded model, or reset()), adopt it instead of fighting it.
+    if (Math.abs(cur - applied) > 1e-3) goal = clamp(cur);
+    const next = cur + (goal - cur) * ease;
+    if (Math.abs(next - cur) < 1e-5) { applied = cur; return; }
+    tmp.copy(camera.position).sub(target).setLength(next).add(target);
+    camera.position.copy(tmp);
+    applied = next;
+  };
+}
+
 export class ModelViewer {
   constructor(canvas, { background = 0x0b0e18 } = {}) {
     this.canvas = canvas;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(background);
+    this.background = background;
     this.camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
     this.camera.position.set(2.4, 1.8, 2.8);
-    this.controls = new OrbitControls(this.camera, canvas);
-    this.controls.enableDamping = true;
 
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(background);
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x404050, 1.1));
     const key = new THREE.DirectionalLight(0xffffff, 1.4); key.position.set(3, 5, 4);
     this.scene.add(key);
@@ -157,19 +195,123 @@ export class ModelViewer {
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
     this.pickCallback = null;
+    this._contextLost = false;
 
-    const loop = () => {
-      this._resize();
-      this.controls.update();
-      this.renderer.render(this.scene, this.camera);
-      requestAnimationFrame(loop);
+    this._initRenderer();      // renderer + controls + context-loss handling
+    this._injectResetButton(); // manual recovery affordance if the view goes blank
+    this._startLoop();
+  }
+
+  // Create the WebGL renderer + camera controls for the current canvas and wire
+  // up GPU context-loss detection. Split out from the constructor so reset() can
+  // rebuild the renderer on a fresh canvas after a lost context.
+  _initRenderer() {
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.controls = new OrbitControls(this.camera, this.canvas);
+    this.controls.enableDamping = true;
+    // Bound the dolly so wheel-zoom can never drive the camera onto its orbit
+    // target. At distance 0 the view math degenerates (camera looking at the
+    // point it sits on), which feeds the GPU a broken camera and trips the
+    // context-loss path below — the "zoom in wipes the viewer" bug. Models are
+    // framed to ~2 units, so these bounds leave plenty of range either way.
+    this.controls.minDistance = 0.4;
+    this.controls.maxDistance = 20;  // ~10x the framed model; keeps it from shrinking to a dot
+    this.controls.enableZoom = false;                                   // replaced by eased zoom
+    this._tickZoom = attachSmoothZoom(this.camera, this.controls, this.canvas);
+
+    // A lost GL context (GPU driver reset, laptop sleep/wake, or too many live
+    // WebGL contexts across open tool tabs) is what makes the viewer suddenly go
+    // blank. preventDefault lets the browser attempt an automatic restore; we
+    // also stop drawing meanwhile and light up the manual Reset button.
+    this._onContextLost = (e) => {
+      e.preventDefault();
+      this._contextLost = true;
+      this._flagReset(true);
     };
-    loop();
+    this._onContextRestored = () => {
+      this._contextLost = false;
+      this._flagReset(false);
+    };
+    this.canvas.addEventListener("webglcontextlost", this._onContextLost, false);
+    this.canvas.addEventListener("webglcontextrestored", this._onContextRestored, false);
+    if (this._bound) this._bindCanvasEvents();  // re-attach pointer handlers after a reset
+  }
+
+  _startLoop() {
+    this._running = true;
+    const loop = () => {
+      if (!this._running) return;
+      requestAnimationFrame(loop);   // schedule first so a transient GL throw can't kill the loop
+      this._resize();
+      this._tickZoom();
+      this.controls.update();
+      if (this._contextLost) return;
+      try { this.renderer.render(this.scene, this.camera); }
+      catch (err) { /* swallow a transient GL error during a context blip */ }
+    };
+    requestAnimationFrame(loop);
+  }
+
+  // Rebuild the WebGL renderer on a fresh canvas. Recovers a viewer that has
+  // gone blank because its context was lost and never restored. The scene,
+  // camera and loaded models are kept — only the GPU context is renewed (a
+  // canvas only ever hands back its original, now-dead context, so we swap in a
+  // clean clone to obtain a brand-new one).
+  reset() {
+    this._running = false;                       // stop the old render loop
+    const old = this.canvas;
+    const parent = old.parentNode;
+    const fresh = old.cloneNode(false);
+    fresh.removeAttribute("width");
+    fresh.removeAttribute("height");
+    if (parent) parent.replaceChild(fresh, old);
+
+    old.removeEventListener("webglcontextlost", this._onContextLost, false);
+    old.removeEventListener("webglcontextrestored", this._onContextRestored, false);
+    if (this.controls) this.controls.dispose();
+    try { this.renderer.forceContextLoss(); } catch (e) { /* already lost */ }
+    this.renderer.dispose();
+
+    this.canvas = fresh;
+    this._contextLost = false;
+    this._initRenderer();
+    this._flagReset(false);
+    this._startLoop();
+  }
+
+  // Small overlay button in the stage so the user can force a rebuild if the
+  // browser can't auto-restore the context. Hidden until hovered, unless a
+  // context loss has been detected (then it pulses to draw attention).
+  _injectResetButton() {
+    const parent = this.canvas.parentNode;
+    if (!parent) return;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "viewer-reset";
+    btn.title = "Reset the 3D view (use if it has gone blank)";
+    btn.textContent = "⟳ Reset view";
+    btn.addEventListener("click", () => {
+      this.reset();
+      if (window.toast) window.toast("3D view reset.", "ok");
+    });
+    parent.appendChild(btn);
+    this._resetBtn = btn;
+  }
+
+  _flagReset(attention) {
+    if (this._resetBtn) this._resetBtn.classList.toggle("attention", !!attention);
   }
 
   _resize() {
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
-    if (this.canvas.width !== w || this.canvas.height !== h) {
+    if (w === 0 || h === 0) return;            // mid-reflow: skip (avoids NaN aspect / zero buffer)
+    // Compare against the backing-store size the renderer would produce. The
+    // canvas's own width/height are in device pixels (CSS × pixelRatio), so we
+    // must scale by pixelRatio before comparing — otherwise on any HiDPI display
+    // this test is always true and setSize churns the GPU buffer every frame.
+    const dpr = this.renderer.getPixelRatio();
+    if (this.canvas.width !== Math.floor(w * dpr) || this.canvas.height !== Math.floor(h * dpr)) {
       this.renderer.setSize(w, h, false);
       this.camera.aspect = w / h;
       this.camera.updateProjectionMatrix();
@@ -217,9 +359,19 @@ export class ModelViewer {
     this.onPick = onPick; this.onMarkerDrag = onMarkerDrag; this.onMarkerDragEnd = onMarkerDragEnd;
     if (this._bound) return;
     this._bound = true;
-    this.canvas.addEventListener("pointerdown", (e) => this._onDown(e));
-    this.canvas.addEventListener("pointermove", (e) => this._onMove(e));
+    this._bindCanvasEvents();
     window.addEventListener("pointerup", (e) => this._onUp(e));
+  }
+
+  // Attach the canvas-scoped pointer handlers. Called on first setInteraction and
+  // again from _initRenderer after reset() swaps in a fresh canvas.
+  _bindCanvasEvents() {
+    if (!this._downHandler) {
+      this._downHandler = (e) => this._onDown(e);
+      this._moveHandler = (e) => this._onMove(e);
+    }
+    this.canvas.addEventListener("pointerdown", this._downHandler);
+    this.canvas.addEventListener("pointermove", this._moveHandler);
   }
 
   setMarkersEnabled(on) { this.markersEnabled = on; }
