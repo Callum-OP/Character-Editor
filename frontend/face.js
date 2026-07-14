@@ -150,7 +150,7 @@ el("run").addEventListener("click", async () => {
     setStatus(`Done — ${morphNames.length} shape keys. Pick an expression.`, "ok");
     if (window.Project) {
       const base = file && file.name ? file.name.replace(/\.[^.]+$/, "") : "head";
-      Project.saveResult({ url: glbUrl, name: base + "_face.glb", tool: "Face" });
+      Project.offerResult({ url: glbUrl, name: base + "_face.glb", tool: "Face" });
     }
   } catch (e) { setStatus("Failed: " + e.message, "err"); }
   finally { el("run").disabled = false; }

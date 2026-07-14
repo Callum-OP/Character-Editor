@@ -9,9 +9,11 @@ Endpoints:
   POST /api/rig/prep     -> detect joint/face markers + front view for editing
   POST /api/rig/build    -> build the rig / face shape keys from markers
   POST /api/cloth/convert -> transcode a browser-draped garment to FBX/etc.
+  POST /api/convert      -> general format converter (any-to-any, whole scene)
   GET  /api/download/{id}/{name} -> fetch a produced result file
 """
 import os
+import re
 import json
 import uuid
 import shutil
@@ -26,6 +28,7 @@ import retopo
 import wrap
 import rig
 import clean
+import convert
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORK = os.path.join(HERE, "work")
@@ -392,6 +395,94 @@ async def cloth_convert(file: UploadFile = File(...), out_format: str = Form("fb
         "job_id": job_id,
         "download_url": f"/api/download/{job_id}/{out_name}",
         "download_name": out_name,
+    })
+
+
+@app.post("/api/convert")
+async def convert_endpoint(
+    file: UploadFile = File(...),
+    out_format: str = Form("fbx"),
+    embed_textures: bool = Form(True),
+    strip_rig: bool = Form(False),
+    compress: str = Form("none"),
+):
+    """General any-to-any format converter (the Converter tool).
+
+    Unlike /api/paint/export (which routes through the retopology script and
+    joins every mesh into one object), this preserves the full scene — multiple
+    objects, armatures/skinning, shape keys, animations and materials — so a
+    rigged multi-part character converts intact. FBX/GLB embed their textures
+    in one file; OBJ/glTF write sidecar files and are returned as a .zip."""
+    out_ext = "." + out_format.lower().lstrip(".")
+    if out_ext not in SUPPORTED_OUT:
+        raise HTTPException(400, f"Unsupported output format '{out_ext}'. "
+                                 f"Allowed: {sorted(SUPPORTED_OUT)}")
+    in_ext = os.path.splitext(file.filename or "")[1].lower()
+    if in_ext not in SUPPORTED_IN:
+        raise HTTPException(400, f"Unsupported input format '{in_ext}'. "
+                                 f"Allowed: {sorted(SUPPORTED_IN)}")
+
+    # Keep the user's file name on the result (sanitized for URL/path safety).
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", os.path.splitext(os.path.basename(file.filename or ""))[0]).strip("._")
+    stem = stem or "model"
+
+    job_id = uuid.uuid4().hex
+    job_dir = os.path.join(WORK, job_id)
+    # Export into a dedicated subfolder so we can bundle *everything* Blender
+    # writes for this format (mesh + material + texture images) into one zip.
+    export_dir = os.path.join(job_dir, "export")
+    os.makedirs(export_dir, exist_ok=True)
+    in_path = os.path.join(job_dir, "convert_in" + in_ext)
+    with open(in_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    compress = compress.lower()
+    if compress not in ("none", "light", "strong"):
+        raise HTTPException(400, "compress must be one of none/light/strong")
+    # Light keeps typical game textures untouched (cap 2048); strong halves
+    # them (cap 1024). Both enable Draco for glTF/GLB.
+    max_texture = {"none": 0, "light": 2048, "strong": 1024}[compress]
+    draco = compress != "none"
+
+    out_path = os.path.join(export_dir, stem + out_ext)
+    stats, notes = None, []
+    # Same-format uploads only skip Blender when no option asks for processing.
+    needs_engine = (out_ext != in_ext or strip_rig or draco
+                    or (out_ext == ".fbx" and not embed_textures))
+    try:
+        if not needs_engine:
+            shutil.copy(in_path, out_path)
+            notes.append("input already in the requested format — passed through unchanged")
+        else:
+            data = convert.run_convert(in_path, out_path, embed_textures=embed_textures,
+                                       strip_rig=strip_rig, draco=draco,
+                                       max_texture=max_texture)
+            stats = data.get("stats")
+            notes = data.get("notes", [])
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+    # If the format produced sidecar files (an .mtl + texture image for OBJ, or
+    # a .bin + textures for glTF), zip the whole export folder so the texture is
+    # delivered with the model. A lone file is returned as-is.
+    produced = [n for n in os.listdir(export_dir) if os.path.isfile(os.path.join(export_dir, n))]
+    if len(produced) > 1:
+        out_name = stem + "_" + out_ext.lstrip(".") + ".zip"
+        zip_path = os.path.join(job_dir, out_name)
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+            for n in produced:
+                z.write(os.path.join(export_dir, n), n)
+    else:
+        out_name = stem + out_ext
+        shutil.copy(out_path, os.path.join(job_dir, out_name))
+
+    return JSONResponse({
+        "job_id": job_id,
+        "download_url": f"/api/download/{job_id}/{out_name}",
+        "download_name": out_name,
+        "zipped": len(produced) > 1,
+        "stats": stats,
+        "notes": notes,
     })
 
 

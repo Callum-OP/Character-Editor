@@ -591,7 +591,7 @@ async function startRig() {
                            : "Rigged model loaded in preview", "ok");
     if (window.Project) {
       const base = selectedFile && selectedFile.name ? selectedFile.name.replace(/\.[^.]+$/, "") : "figure";
-      Project.saveResult({
+      Project.offerResult({
         url: glbDownload,
         name: base + (inputType === "head" ? "_face.glb" : "_rigged.glb"),
         tool: inputType === "head" ? "Face (head)" : "Rig",

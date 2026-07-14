@@ -486,7 +486,7 @@ $("export").addEventListener("click", async () => {
     const root = exportRoot();
     const glb = await new Promise((res, rej) => new GLTFExporter().parse(root, res, rej, { binary: true }));
     const glbBlob = new Blob([glb], { type: "model/gltf-binary" });
-    if (window.Project) Project.saveResult({ blob: glbBlob, name: "garment.glb", tool: "Cloth" });
+    if (window.Project) Project.offerResult({ blob: glbBlob, name: "garment.glb", tool: "Cloth" });
     if (fmt === "glb") { triggerBlob(glbBlob, "garment.glb"); status("Saved garment.glb", "ok"); return; }
     if (fmt === "obj") {
       triggerBlob(new Blob([new OBJExporter().parse(root)], { type: "text/plain" }), "garment.obj");

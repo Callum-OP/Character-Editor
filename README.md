@@ -355,11 +355,42 @@ vertices) and applies the fixes you enable:
 Decimate (collapse) modifier. Give a list of collapse ratios (e.g.
 `0.5,0.25,0.125`) to emit one mesh per level, or a single **target face count**.
 **Preserve UVs** and **preserve open boundaries** keep texture seams and silhouette
-edges intact through the collapse. Each level previews in the viewer, downloads on
-its own, and can be pushed back to the project as the current model.
+edges intact through the collapse. Each level previews in the viewer and downloads
+on its own.
 
 **Formats:** imports OBJ / GLB / glTF / FBX / PLY / STL; exports the same set (the
 viewer always uses an OBJ copy so the wireframe is exact).
 
 **API:** `POST /api/clean` (repair + diagnostics), `POST /api/lod` (decimated
 levels).
+
+---
+
+# Tool — Format Converter
+
+Convert a model between **OBJ / GLB / glTF / FBX / PLY / STL** — any direction —
+with textures, rigs and animations preserved where the target format supports
+them. Driven by Blender headless (`backend/blender_convert.py`, engine layer
+`backend/convert.py`), which re-exports the *whole scene* (multiple objects,
+armatures, skinning, shape keys, animations, materials) rather than joining
+everything into one mesh.
+
+**Texture handling per format:** FBX and GLB embed textures in a single file;
+OBJ and glTF write them as separate image files and are delivered as a .zip;
+PLY/STL carry geometry only. Textures that exist only inside the source file
+(e.g. packed into a GLB) are written out as real PNGs first so no format loses
+them.
+
+**Options**
+- **Embed textures inside the FBX** (default on) — turn off if the target app
+  doesn't show textures on import; the textures then come as separate images in
+  a .zip and must stay in the same folder as the model.
+- **Mesh only — strip rig & animations** — some apps can't read textures on a
+  rigged model; this drops the armature and keeps the mesh at rest pose.
+- **Compression** — *Light* caps textures at 2048px, *Strong* at 1024px; both
+  also compress GLB/glTF mesh data (not every app can open compressed meshes).
+
+The converter never touches projects — results are download-only.
+
+**API:** `POST /api/convert` (multipart: `file`, `out_format`, `embed_textures`,
+`strip_rig`, `compress=none|light|strong`).

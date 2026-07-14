@@ -16,6 +16,7 @@
     { href: "/face.html",     ic: "☺", lbl: "Face" },
     { href: "/cloth.html",    ic: "〜", lbl: "Cloth" },
     { href: "/paint.html",    ic: "▧", lbl: "Paint" },
+    { href: "/convert.html",  ic: "⇄", lbl: "Convert" },
   ];
   var LS_KEY = "ce.activeProject";
 
@@ -76,6 +77,9 @@
 
   /* ---------------------------------------------------------- Project ------ */
   var state = { id: null, manifest: null };
+  // The current tool page's latest result, registered via Project.offerResult.
+  // Only ever uploaded when the user clicks "Save as new project".
+  var offeredResult = null;
 
   function dispatchChange() {
     window.dispatchEvent(new CustomEvent("project:change",
@@ -138,6 +142,14 @@
         .catch(function () { Project._set(null); state = { id: null, manifest: null }; sync(); return null; });
     },
 
+    // Register a tool's latest result so the explicit "Save as new project"
+    // button can save it. Nothing is uploaded and no project is touched until
+    // the user clicks that button. opts: { url? | blob?, name, tool }
+    offerResult: function (opts) {
+      offeredResult = opts || null;
+      toggleUseButtons();
+    },
+
     // Save a tool result as the project's new current model (auto-creates a
     // project if none is active). opts: { url? | blob?, name, tool }
     saveResult: function (opts) {
@@ -157,14 +169,22 @@
       }).catch(function (e) { if (window.toast) toast("Couldn't save to project: " + (e.message || e), "err"); });
     },
 
-    // Save the *completed* model (the active project's current asset) into a
-    // brand-new project, WITHOUT touching or switching away from the project the
-    // user is working in. Used by the "Save as new project" affordance so a
-    // finished character can be branched off instead of overriding the original.
-    // opts: { name?, tool? }
+    // Save the completed model into a brand-new project, WITHOUT touching or
+    // switching away from the project the user is working in. Prefers the
+    // result the current tool offered (via offerResult); falls back to the
+    // active project's current asset. opts: { name?, tool? }
     forkToNew: function (opts) {
       opts = opts || {};
-      return Project.getCurrentFile().then(function (file) {
+      var fileP;
+      if (offeredResult) {
+        fileP = (offeredResult.blob
+          ? Promise.resolve(offeredResult.blob)
+          : fetch(offeredResult.url).then(function (r) { return r.blob(); }))
+          .then(function (blob) { return new File([blob], offeredResult.name || "model.glb"); });
+      } else {
+        fileP = Project.getCurrentFile();
+      }
+      return fileP.then(function (file) {
         if (!file) { if (window.toast) toast("No completed model to save yet — export/save it first.", "err"); return null; }
         var pname = opts.name || Project.suggestForkName();
         return fetch("/api/project", {
@@ -184,9 +204,10 @@
       }).catch(function (e) { if (window.toast) toast("Couldn't save to new project: " + (e.message || e), "err"); });
     },
 
-    // Default name for a forked project: the current model / project name + date.
+    // Default name for a forked project: the offered result / current model /
+    // project name + date.
     suggestForkName: function () {
-      var cur = Project.current();
+      var cur = offeredResult || Project.current();
       var base = (cur && cur.name ? cur.name.replace(/\.[^.]+$/, "") : (state.manifest && state.manifest.name)) || "Completed model";
       var d = new Date(), p = function (n) { return (n < 10 ? "0" : "") + n; };
       return base + " " + d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
@@ -349,10 +370,12 @@
       b.classList.toggle("hidden", !cur);
       if (cur) b.title = "Load “" + cur.name + "” from " + (state.manifest ? "“" + state.manifest.name + "”" : "the project");
     });
-    // "Save as new project" only makes sense once there's a completed model.
+    // "Save as new project" only makes sense once there's a completed model:
+    // either a result this tool just produced, or the project's current asset.
     document.querySelectorAll("[data-save-new]").forEach(function (b) {
-      b.classList.toggle("hidden", !cur);
-      if (cur) b.title = "Save “" + cur.name + "” into a brand-new project (leaves the current one untouched)";
+      var subject = offeredResult || cur;
+      b.classList.toggle("hidden", !subject);
+      if (subject) b.title = "Save “" + subject.name + "” into a brand-new project (leaves the current one untouched)";
     });
   }
   document.addEventListener("click", function (e) {

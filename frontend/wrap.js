@@ -253,7 +253,7 @@ el("run").addEventListener("click", async () => {
     d.href = data.download_url; d.setAttribute("download", data.download_name);
     d.textContent = "Download " + data.download_name; d.classList.remove("hidden");
     setStatus("Done.", "ok");
-    if (window.Project) Project.saveResult({ url: data.download_url, name: data.download_name, tool: "Wrap" });
+    if (window.Project) Project.offerResult({ url: data.download_url, name: data.download_name, tool: "Wrap" });
   } catch (e) { setStatus("Failed: " + e.message, "err"); }
   finally { el("run").disabled = false; }
 });

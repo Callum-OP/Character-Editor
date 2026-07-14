@@ -89,7 +89,7 @@ async function runClean(fd) {
   dlEl.href = data.download_url; dlEl.setAttribute("download", data.download_name);
   dlEl.textContent = "Download " + data.download_name; dlEl.classList.remove("hidden");
   setStatus("Done.", "ok");
-  if (window.Project) Project.saveResult({ url: data.download_url, name: data.download_name, tool: "Cleanup" });
+  if (window.Project) Project.offerResult({ url: data.download_url, name: data.download_name, tool: "Cleanup" });
 }
 
 async function runLod(fd) {
@@ -146,11 +146,11 @@ function showLodLevels(data) {
     dl.href = lv.download_url; dl.setAttribute("download", lv.download_name);
     dl.className = "seg"; dl.textContent = "Download";
     const use = document.createElement("button");
-    use.type = "button"; use.className = "seg"; use.textContent = "Preview / use";
+    use.type = "button"; use.className = "seg"; use.textContent = "Preview";
     use.addEventListener("click", async () => {
       await viewer.setModelFromOBJUrl("result", lv.view_url);
       viewer.setActive("result"); activeSeg("result");
-      if (window.Project) Project.saveResult({ url: lv.download_url, name: lv.download_name, tool: "LOD" });
+      if (window.Project) Project.offerResult({ url: lv.download_url, name: lv.download_name, tool: "LOD" });
     });
     const acts = document.createElement("span");
     acts.style.display = "flex"; acts.style.gap = "6px";

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Format Converter — Character Editor</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="/shell.js" defer></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body class="tool">
+  <div class="workspace">
+  <aside id="panel">
+    <h1>Format<br/>Converter</h1>
+    <p class="sub">Convert a model between formats — any direction, textures,
+       rigs and animations included where the format supports them.</p>
+
+    <div id="engine" class="engine">Detecting engine&hellip;</div>
+
+    <label class="field">
+      <span>Model file</span>
+      <input type="file" id="file" accept=".obj,.glb,.gltf,.fbx,.ply,.stl" />
+      <small>OBJ, GLB/glTF, FBX, PLY, STL</small>
+    </label>
+
+    <button type="button" data-project-use class="hidden">Use current project model</button>
+
+    <label class="field">
+      <span>Convert to</span>
+      <select id="outFormat">
+        <option value="fbx" selected>FBX — textures embedded in one file</option>
+        <option value="glb">GLB — textures embedded in one file</option>
+        <option value="gltf">glTF — mesh + textures as a .zip</option>
+        <option value="obj">OBJ — mesh + material + textures as a .zip</option>
+        <option value="ply">PLY — geometry only (keeps vertex colors)</option>
+        <option value="stl">STL — geometry only (for 3D printing)</option>
+      </select>
+      <small id="fmtNote">FBX packs the mesh, rig, animations and textures into a single file.</small>
+    </label>
+
+    <fieldset class="field">
+      <span>Options</span>
+      <label class="check" id="embedRow"><input type="checkbox" id="embedTex" checked /> Embed textures inside the FBX</label>
+      <small id="embedNote">Uncheck if your app doesn't show the textures — they are
+        then delivered as separate image files in a .zip; keep them in the same
+        folder as the model when importing.</small>
+      <label class="check"><input type="checkbox" id="stripRig" /> Mesh only — strip rig &amp; animations</label>
+      <small>Some apps can't read textures on a rigged model — try this if the
+        model imports blank or grey.</small>
+      <label class="field">
+        <span>Compression</span>
+        <select id="compress">
+          <option value="none" selected>None — keep everything as-is</option>
+          <option value="light">Light — textures capped at 2048px</option>
+          <option value="strong">Strong — textures capped at 1024px</option>
+        </select>
+        <small id="compressNote">GLB/glTF mesh data is also compressed to shrink the
+          file further — some apps can't open compressed meshes.</small>
+      </label>
+    </fieldset>
+
+    <button id="run" disabled>Convert</button>
+    <div id="status" class="status"></div>
+
+    <div id="stats" class="stats hidden"></div>
+    <a id="download" class="download hidden" download>Download result</a>
+
+    <footer>
+      <p>View:
+        <button class="seg active" data-view="result">Result</button>
+        <button class="seg" data-view="original">Original</button>
+      </p>
+      <p>
+        <label class="check"><input type="checkbox" id="wire" /> Wireframe</label>
+        <label class="check"><input type="checkbox" id="shade" checked /> Shaded</label>
+      </p>
+    </footer>
+  </aside>
+
+  <main id="stage">
+    <div id="hint">Load a model to begin.</div>
+    <canvas id="view"></canvas>
+  </main>
+  </div>
+
+  <script type="module" src="convert.js"></script>
+</body>
+</html>

@@ -91,7 +91,7 @@ runBtn.addEventListener("click", async () => {
     dlEl.href = data.download_url; dlEl.setAttribute("download", data.download_name);
     dlEl.textContent = "Download " + data.download_name; dlEl.classList.remove("hidden");
     setStatus("Done.", "ok");
-    if (window.Project) Project.saveResult({ url: data.download_url, name: data.download_name, tool: "Topology" });
+    if (window.Project) Project.offerResult({ url: data.download_url, name: data.download_name, tool: "Topology" });
   } catch (err) { setStatus("Failed: " + err.message, "err"); }
   finally { runBtn.disabled = false; }
 });
