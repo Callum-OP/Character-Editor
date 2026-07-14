@@ -476,6 +476,14 @@ details.grp .field { margin-top: 10px; }
 .stats .v { text-align: right; font-variant-numeric: tabular-nums; }
 .stats .v.note { white-space: normal; text-align: left; color: var(--ok); grid-column: 1 / -1; }
 
+/* Converter: server-rendered snapshot of the converted file */
+figure.snapshot { margin: 0; }
+figure.snapshot img {
+  display: block; width: 100%; border-radius: var(--radius-sm);
+  background: var(--glass); border: 1px solid var(--brd);
+}
+figure.snapshot figcaption { color: var(--muted); font-size: 11px; line-height: 1.45; margin-top: 6px; }
+
 /* ==========================================================================
    Wrap tool — landmarks + Face tool — shape sliders
    ========================================================================== */

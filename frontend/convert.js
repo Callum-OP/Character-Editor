@@ -19,6 +19,8 @@ const runBtn = document.getElementById("run");
 const statusEl = document.getElementById("status");
 const statsEl = document.getElementById("stats");
 const dlEl = document.getElementById("download");
+const snapBox = document.getElementById("snapshotBox");
+const snapImg = document.getElementById("snapshot");
 const hint = document.getElementById("hint");
 const outFormat = document.getElementById("outFormat");
 const fmtNote = document.getElementById("fmtNote");
@@ -81,7 +83,7 @@ window.addEventListener("project:use-model", (e) => loadInput(e.detail.file));
 runBtn.addEventListener("click", async () => {
   if (!currentFile) return;
   runBtn.disabled = true;
-  statsEl.classList.add("hidden"); dlEl.classList.add("hidden");
+  statsEl.classList.add("hidden"); dlEl.classList.add("hidden"); snapBox.classList.add("hidden");
   const fd = new FormData();
   fd.append("file", currentFile);
   fd.append("out_format", outFormat.value);
@@ -97,6 +99,13 @@ runBtn.addEventListener("click", async () => {
     dlEl.href = data.download_url; dlEl.setAttribute("download", data.download_name);
     dlEl.textContent = "Download " + data.download_name; dlEl.classList.remove("hidden");
     showStats(data);
+
+    // Server-side render of the converted file: unlike the 3D preview below
+    // (bare geometry) it shows textures, skinning and pose as importers see them.
+    if (data.preview_url) {
+      snapImg.src = data.preview_url;
+      snapBox.classList.remove("hidden");
+    }
 
     // Preview the converted file when it's a single model file (zips bundle
     // sidecar textures the browser-side loaders can't resolve).

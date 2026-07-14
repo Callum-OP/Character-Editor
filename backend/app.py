@@ -482,6 +482,7 @@ async def convert_endpoint(
     draco = compress != "none"
 
     out_path = os.path.join(export_dir, stem + out_ext)
+    snapshot_path = os.path.join(job_dir, "preview.png")
     stats, notes = None, []
     # Same-format uploads only skip Blender when no option asks for processing.
     needs_engine = (out_ext != in_ext or strip_rig or draco
@@ -493,7 +494,7 @@ async def convert_endpoint(
         else:
             data = convert.run_convert(in_path, out_path, embed_textures=embed_textures,
                                        strip_rig=strip_rig, draco=draco,
-                                       max_texture=max_texture)
+                                       max_texture=max_texture, snapshot=snapshot_path)
             stats = data.get("stats")
             notes = data.get("notes", [])
     except Exception as e:
@@ -520,6 +521,10 @@ async def convert_endpoint(
         "zipped": len(produced) > 1,
         "stats": stats,
         "notes": notes,
+        # Server-side render of the converted file as other apps will read it —
+        # unlike the browser preview it shows textures, skinning and pose.
+        "preview_url": (f"/api/download/{job_id}/preview.png"
+                        if os.path.isfile(snapshot_path) else None),
     })
 
 

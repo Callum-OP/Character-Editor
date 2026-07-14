@@ -27,6 +27,9 @@ Args after the `--` separator:
     --draco                   glTF/GLB only: Draco mesh compression
     --max-texture <px>        scale any texture above <px> down to <px> on its
                               long side (0 = leave textures untouched)
+    --snapshot <png>          after exporting, re-import the converted file and
+                              render it to this PNG — an honest preview of how
+                              other applications will read the result
 
 Emits a single JSON line to stdout prefixed with CONVERT_RESULT: so the
 calling process can parse the result reliably.
@@ -50,7 +53,8 @@ def argv_after_dashes():
 
 def parse_args(args):
     out = {"input": None, "output": None, "embed": True,
-           "strip_rig": False, "draco": False, "max_texture": 0}
+           "strip_rig": False, "draco": False, "max_texture": 0,
+           "snapshot": None}
     i = 0
     while i < len(args):
         a = args[i]
@@ -66,6 +70,8 @@ def parse_args(args):
             out["draco"] = True; i += 1
         elif a == "--max-texture":
             out["max_texture"] = int(args[i + 1]); i += 2
+        elif a == "--snapshot":
+            out["snapshot"] = args[i + 1]; i += 2
         else:
             i += 1
     return out
@@ -95,7 +101,12 @@ def import_model(path):
         else:
             bpy.ops.import_scene.obj(filepath=path)
     elif ext in (".glb", ".gltf"):
-        bpy.ops.import_scene.gltf(filepath=path)
+        # Don't let the importer "guess the original bind pose": the guess
+        # reconstructs twist-bone orientations wrongly on some game rigs
+        # (necks/wrists spiral) and leaves the whole scene posed away from
+        # rest. Importing the node transforms as the rest pose keeps the
+        # character exactly as glTF viewers display it.
+        bpy.ops.import_scene.gltf(filepath=path, guess_original_bind_pose=False)
     elif ext == ".fbx":
         bpy.ops.import_scene.fbx(filepath=path)
     elif ext == ".ply":
@@ -196,6 +207,72 @@ def export_model(path, embed=True, draco=False):
         raise ValueError("Unsupported output extension: %s" % ext)
 
 
+def bake_pose_into_rest():
+    """Make the armature's rest pose equal its current pose (visuals unchanged).
+
+    glTF files often display a pose that differs from the skin's bind pose;
+    Blender imports that as a pose on top of the rest pose. The FBX round trip
+    reconstructs such a pose imprecisely and the error compounds down long
+    bone chains — on a 400-bone character the face/eye meshes drift several
+    millimetres ("slightly mangled"). When the file has no animations the pose
+    is purely cosmetic, so baking the deformed shape into the meshes and the
+    pose into the rest pose makes rest == pose and the export exact.
+
+    Skipped when there are animations (their curves are relative to the old
+    rest pose) or when a skinned mesh has shape keys (baking would drop them).
+    Returns True if a pose was baked."""
+    from mathutils import Matrix
+    scene = bpy.context.scene
+    if bpy.data.actions:
+        return False
+    armatures = [o for o in scene.objects if o.type == "ARMATURE"]
+    if not armatures:
+        return False
+
+    def is_posed(arm):
+        ident = Matrix.Identity(4)
+        for pb in arm.pose.bones:
+            m = pb.matrix_basis
+            if any(abs(m[i][j] - ident[i][j]) > 1e-5 for i in range(4) for j in range(4)):
+                return True
+        return False
+
+    if not any(is_posed(a) for a in armatures):
+        return False
+    skinned = [o for o in scene.objects if o.type == "MESH"
+               and any(m.type == "ARMATURE" and m.object for m in o.modifiers)]
+    if any(o.data.shape_keys for o in skinned):
+        return False
+
+    # Replace each skinned mesh with its deformed (posed) shape. Vertex groups
+    # live on the object and the armature modifier stays, so the mesh remains
+    # skinned — and once the pose becomes the rest pose below, the modifier
+    # deforms it by exactly nothing.
+    for o in skinned:
+        deps = bpy.context.evaluated_depsgraph_get()
+        eo = o.evaluated_get(deps)
+        baked = bpy.data.meshes.new_from_object(
+            eo, preserve_all_data_layers=True, depsgraph=deps)
+        old = o.data
+        o.data = baked
+        if old.users == 0:
+            bpy.data.meshes.remove(old)
+
+    for arm in armatures:
+        # armature_apply moves the bones, which would drag along any object
+        # parented to a bone — pin those back to where they were.
+        keep = [(c, c.matrix_world.copy()) for c in scene.objects
+                if c.parent == arm and c.parent_type == "BONE"]
+        bpy.context.view_layer.objects.active = arm
+        bpy.ops.object.mode_set(mode="POSE")
+        bpy.ops.pose.select_all(action="SELECT")
+        bpy.ops.pose.armature_apply(selected=False)
+        bpy.ops.object.mode_set(mode="OBJECT")
+        for c, mw in keep:
+            c.matrix_world = mw
+    return True
+
+
 def strip_rig():
     """Remove armatures, skinning and animations, keeping meshes at rest pose.
 
@@ -246,6 +323,78 @@ def cap_textures(max_px):
         except Exception:
             pass  # leave the original texture untouched on any failure
     return resized
+
+
+def render_snapshot(model_path, png_path):
+    """Re-import the converted file and render it to a PNG.
+
+    Importing what was actually written — instead of rendering the scene that
+    was exported — makes the snapshot an honest preview of how other
+    applications will reconstruct the file, so export defects (broken pose,
+    lost textures) show up in the picture instead of only on the user's next
+    import. Returns True when the PNG was written."""
+    import math
+    from mathutils import Vector
+    try:
+        clear_scene()
+        import_model(model_path)
+
+        # Workbench draws the viewport display color, which importers other
+        # than glTF's leave fully opaque — copy each material's real alpha
+        # into it so transparent shell meshes don't render as solid white.
+        for m in bpy.data.materials:
+            if not m.use_nodes:
+                continue
+            for n in m.node_tree.nodes:
+                if n.type == "BSDF_PRINCIPLED":
+                    a = n.inputs["Alpha"].default_value
+                    if a < 1.0:
+                        c = m.diffuse_color
+                        m.diffuse_color = (c[0], c[1], c[2], a)
+
+        deps = bpy.context.evaluated_depsgraph_get()
+        mins = Vector((1e18, 1e18, 1e18))
+        maxs = Vector((-1e18, -1e18, -1e18))
+        for o in bpy.context.scene.objects:
+            if o.type != "MESH":
+                continue
+            eo = o.evaluated_get(deps)
+            me = eo.to_mesh()
+            mw = eo.matrix_world
+            for v in me.vertices:
+                p = mw @ v.co
+                mins = Vector(map(min, mins, p))
+                maxs = Vector(map(max, maxs, p))
+            eo.to_mesh_clear()
+        if mins.x > maxs.x:
+            return False
+        center = (mins + maxs) / 2
+        size = (maxs - mins).length or 1.0
+
+        scene = bpy.context.scene
+        scene.render.resolution_x = 512
+        scene.render.resolution_y = 640
+        scene.render.film_transparent = True
+        scene.render.engine = "BLENDER_WORKBENCH"
+        scene.display.shading.light = "STUDIO"
+        scene.display.shading.color_type = "TEXTURE"
+
+        cam_data = bpy.data.cameras.new("snapshot_cam")
+        cam_data.clip_end = size * 20
+        cam = bpy.data.objects.new("snapshot_cam", cam_data)
+        scene.collection.objects.link(cam)
+        scene.camera = cam
+        # Slight three-quarter view reads better than a flat front-on shot.
+        ang = math.radians(20)
+        dist = size * 1.1
+        cam.location = center + Vector((math.sin(ang) * dist, -math.cos(ang) * dist, 0))
+        cam.rotation_euler = (center - cam.location).to_track_quat("-Z", "Y").to_euler()
+
+        scene.render.filepath = png_path
+        bpy.ops.render.render(write_still=True)
+        return os.path.isfile(png_path)
+    except Exception:
+        return False
 
 
 def scene_stats():
@@ -309,15 +458,22 @@ def main():
         notes.append("mesh data compressed — some apps can't open compressed glTF/GLB files")
     if out_ext == ".fbx" and not cfg["embed"]:
         notes.append("textures written as separate files next to the .fbx (keep them in the same folder)")
+    if out_ext == ".fbx" and bake_pose_into_rest():
+        notes.append("static pose baked into the rest pose so the FBX deforms exactly like the original")
 
     os.makedirs(os.path.dirname(os.path.abspath(cfg["output"])), exist_ok=True)
     export_model(cfg["output"], embed=cfg["embed"], draco=draco)
+
+    snapshot = False
+    if cfg["snapshot"]:
+        snapshot = render_snapshot(cfg["output"], cfg["snapshot"])
 
     print("CONVERT_RESULT:" + json.dumps({
         "ok": True,
         "stats": stats,
         "notes": notes,
         "output": cfg["output"],
+        "snapshot": snapshot,
     }))
 
 

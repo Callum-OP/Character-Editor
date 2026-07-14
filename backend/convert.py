@@ -25,13 +25,15 @@ def _blender():
 
 
 def run_convert(in_path, out_path, embed_textures=True, strip_rig=False,
-                draco=False, max_texture=0):
+                draco=False, max_texture=0, snapshot=None):
     """Re-encode a model into another format, preserving the full scene.
 
     embed_textures=False writes FBX textures as sidecar image files instead of
     packing them into the .fbx; strip_rig removes armatures/animations (both
     for strict importers). draco enables Draco mesh compression for glTF/GLB;
-    max_texture > 0 scales oversized textures down."""
+    max_texture > 0 scales oversized textures down. snapshot renders the
+    converted file (re-imported, so the picture shows what other apps will
+    read) to the given PNG path."""
     cmd = [
         _blender(), "--background", "--factory-startup", "--python", CONVERT_SCRIPT,
         "--", "--input", in_path, "--output", out_path,
@@ -44,6 +46,8 @@ def run_convert(in_path, out_path, embed_textures=True, strip_rig=False,
         cmd.append("--draco")
     if max_texture:
         cmd += ["--max-texture", str(int(max_texture))]
+    if snapshot:
+        cmd += ["--snapshot", snapshot]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
     result_line = None
     for line in (proc.stdout or "").splitlines():

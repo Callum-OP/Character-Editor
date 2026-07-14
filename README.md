@@ -409,7 +409,19 @@ them.
 - **Compression** — *Light* caps textures at 2048px, *Strong* at 1024px; both
   also compress GLB/glTF mesh data (not every app can open compressed meshes).
 
+**Fidelity:** glTF files are imported without Blender's "guess original bind
+pose" (the guess twists twist-bones on some game rigs), and when a file has a
+static pose but no animations, that pose is baked into the rest pose before an
+FBX export — otherwise the pose survives the FBX round trip imprecisely and
+long bone chains (faces, fingers) drift visibly.
+
+**Result snapshot:** after converting, the page shows a server-side Blender
+render of the converted file (re-imported first, so the picture is what other
+apps will actually read — textures, skinning and pose included). The in-browser
+3D preview shows bare geometry only, so the snapshot is the honest check.
+
 The converter never touches projects — results are download-only.
 
 **API:** `POST /api/convert` (multipart: `file`, `out_format`, `embed_textures`,
-`strip_rig`, `compress=none|light|strong`).
+`strip_rig`, `compress=none|light|strong`). The response includes
+`preview_url` for the rendered snapshot when the engine produced one.
