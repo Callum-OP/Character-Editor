@@ -8,9 +8,9 @@ import json
 import subprocess
 
 import retopo
+import paths
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-CONVERT_SCRIPT = os.path.join(HERE, "blender_convert.py")
+CONVERT_SCRIPT = os.path.join(paths.resource_dir(), "blender_convert.py")
 
 
 def _blender():

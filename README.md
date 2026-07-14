@@ -84,6 +84,25 @@ $env:BLENDER_PATH = "C:\Program Files\Blender Foundation\Blender 4.2\blender.exe
 uvicorn app:app --port 8000
 ```
 
+## Desktop app
+
+The app also runs as a self-contained desktop program — its own window, no
+manual server start, works offline (Three.js and fonts are vendored):
+
+```bash
+python backend/desktop.py        # from a source checkout
+```
+
+or build the double-clickable version:
+
+```powershell
+.\packaging\build.ps1            # portable CharacterEditor.exe
+.\packaging\build-msix.ps1       # installable / Microsoft Store package
+```
+
+See `packaging/README.md` for signing, sideloading and Store submission.
+Blender remains an external prerequisite for the engine-backed tools.
+
 ## Formats
 
 | Format | Import | Export | Keeps quads on export |

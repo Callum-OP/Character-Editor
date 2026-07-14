@@ -12,9 +12,9 @@ import uuid
 import subprocess
 
 import retopo  # reuse Blender detection
+import paths
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-PIPELINE = os.path.join(HERE, "rigger", "pipeline.py")
+PIPELINE = os.path.join(paths.resource_dir(), "rigger", "pipeline.py")
 DEFAULT_TARGET_HEIGHT = 1.8
 
 
@@ -31,7 +31,7 @@ def run_job(fields, on_log=None, timeout=1200):
     job.update(fields)
     output = job.get("output")
 
-    job_file = os.path.join(HERE, "work", "rigjob_%s.json" % uuid.uuid4().hex)
+    job_file = os.path.join(paths.work_dir(), "rigjob_%s.json" % uuid.uuid4().hex)
     os.makedirs(os.path.dirname(job_file), exist_ok=True)
     with open(job_file, "w") as f:
         json.dump(job, f)

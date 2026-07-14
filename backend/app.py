@@ -29,11 +29,48 @@ import wrap
 import rig
 import clean
 import convert
+import paths
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-WORK = os.path.join(HERE, "work")
-FRONTEND = os.path.normpath(os.path.join(HERE, "..", "frontend"))
+WORK = paths.work_dir()
+FRONTEND = paths.frontend_dir()
 os.makedirs(WORK, exist_ok=True)
+
+# Job folders are one-shot scratch space (upload -> result -> download); they
+# were never deleted, so the work folder grew without bound. Sweep anything
+# older than this on every server start. Saved projects are kept forever.
+WORK_MAX_AGE = 3 * 24 * 3600  # seconds
+WORK_KEEP = {"projects", ".gitkeep"}
+
+
+def _cleanup_work():
+    now = time.time()
+    freed = 0
+    for name in os.listdir(WORK):
+        if name in WORK_KEEP:
+            continue
+        path = os.path.join(WORK, name)
+        try:
+            # The rig folder is reused across runs — sweep its old files but
+            # keep the folder itself.
+            targets = ([os.path.join(path, n) for n in os.listdir(path)]
+                       if name == "rig" and os.path.isdir(path) else [path])
+            for t in targets:
+                if now - os.path.getmtime(t) <= WORK_MAX_AGE:
+                    continue
+                if os.path.isdir(t):
+                    freed += sum(os.path.getsize(os.path.join(r, f))
+                                 for r, _, fs in os.walk(t) for f in fs)
+                    shutil.rmtree(t, ignore_errors=True)
+                else:
+                    freed += os.path.getsize(t)
+                    os.remove(t)
+        except OSError:
+            pass  # a busy/locked entry is skipped and retried next start
+    if freed:
+        print("work cleanup: freed %.1f MB of old job files" % (freed / 1048576))
+
+
+_cleanup_work()
 
 SUPPORTED_IN = {".obj", ".glb", ".gltf", ".fbx", ".ply", ".stl"}
 SUPPORTED_OUT = {".obj", ".glb", ".gltf", ".fbx", ".ply", ".stl"}

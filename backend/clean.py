@@ -7,9 +7,9 @@ import json
 import subprocess
 
 import retopo
+import paths
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-CLEAN_SCRIPT = os.path.join(HERE, "blender_clean.py")
+CLEAN_SCRIPT = os.path.join(paths.resource_dir(), "blender_clean.py")
 
 
 def _blender():

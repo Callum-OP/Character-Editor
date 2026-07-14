@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSIX manifest for Character Editor (full-trust desktop app).
+
+  The Identity Name / Publisher below are placeholders. For a signed sideload
+  build, they must match your signing certificate's subject. For a Microsoft
+  Store submission, replace them with the exact values Partner Center shows
+  under Product management > Product identity (the Store then signs the
+  package for you). build-msix.ps1 can patch these via parameters.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
+
+  <Identity Name="CharacterEditor.App"
+            Publisher="CN=CHANGE-ME"
+            Version="1.0.0.0"
+            ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>Character Editor</DisplayName>
+    <PublisherDisplayName>CHANGE-ME</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Capabilities>
+    <!-- Classic desktop app packaged as MSIX: needed to run the bundled
+         server and to launch Blender. -->
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+
+  <Applications>
+    <Application Id="CharacterEditor"
+                 Executable="CharacterEditor\CharacterEditor.exe"
+                 EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="Character Editor"
+        Description="3D character and mesh toolkit: retopology, shape matching, rigging, face expressions, cloth, painting, styling, cleanup and format conversion."
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+</Package>

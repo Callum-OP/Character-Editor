@@ -15,8 +15,9 @@ import shutil
 import subprocess
 import platform
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-BLENDER_SCRIPT = os.path.join(HERE, "blender_remesh.py")
+import paths
+
+BLENDER_SCRIPT = os.path.join(paths.resource_dir(), "blender_remesh.py")
 
 # Formats Blender can round-trip. Instant Meshes only handles obj/ply.
 BLENDER_FORMATS = {".obj", ".glb", ".gltf", ".fbx", ".ply", ".stl"}

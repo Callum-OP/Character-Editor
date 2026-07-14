@@ -6,3 +6,8 @@ backend/work/*
 venv/
 .DS_Store
 reference
+# desktop build outputs (regenerate with packaging\build.ps1 / build-msix.ps1)
+packaging/build/
+packaging/dist/
+packaging/assets/
+packaging/msix/staging/

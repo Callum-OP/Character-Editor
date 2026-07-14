@@ -7,9 +7,9 @@ import json
 import subprocess
 
 import retopo
+import paths
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-WRAP_SCRIPT = os.path.join(HERE, "blender_wrap.py")
+WRAP_SCRIPT = os.path.join(paths.resource_dir(), "blender_wrap.py")
 
 
 def _blender():
