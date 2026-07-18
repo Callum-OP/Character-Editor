@@ -97,11 +97,23 @@
     </label>
 
     <label class="field">
+      <span>Rig</span>
+      <label class="check"><input type="checkbox" id="preserveBones" checked />
+        Preserve bones (keep armature attached)</label>
+      <small>If your model has a skeleton, it's kept and moved rigidly with it
+        through alignment (bone weights are unaffected either way — Wrap never
+        changes vertex order). Turn off to drop the armature from the result.</small>
+    </label>
+
+    <label class="field">
       <span>Alignment</span>
       <select id="align">
         <option value="bbox" selected>Auto: match size &amp; center</option>
+        <option value="rigid">Auto: match size, center &amp; rotation (ICP)</option>
         <option value="none">None (already aligned)</option>
       </select>
+      <small>"Rigid" also solves for orientation via iterative closest-point —
+        use it when the two models aren't already facing the same way.</small>
     </label>
 
     <label class="field">

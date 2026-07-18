@@ -343,6 +343,7 @@ async def wrap_endpoint(
     out_format: str = Form("glb"),
     landmarks: str = Form(""),
     keep_internal: bool = Form(True),
+    preserve_bones: bool = Form(True),
 ):
     """Phase 2: run the wrap using the job's stored models + picked landmarks."""
     job_dir = _safe_job_dir(job_id)
@@ -356,8 +357,8 @@ async def wrap_endpoint(
     if shape_keys not in ("preserve", "base"):
         raise HTTPException(400, "shape_keys must be preserve/base")
     align = align.lower()
-    if align not in ("bbox", "none"):
-        raise HTTPException(400, "align must be bbox/none")
+    if align not in ("bbox", "none", "rigid"):
+        raise HTTPException(400, "align must be bbox/none/rigid")
     sym_axis = sym_axis.lower()
     if sym_axis not in ("none", "x", "y", "z"):
         raise HTTPException(400, "sym_axis must be none/x/y/z")
@@ -386,6 +387,7 @@ async def wrap_endpoint(
             strength=strength, smooth_iters=smooth_iters,
             shape_keys=shape_keys, align=align,
             landmarks=lm_path, sym_axis=sym_axis, keep_internal=keep_internal,
+            preserve_bones=preserve_bones,
         )
     except Exception as e:
         raise HTTPException(500, str(e))

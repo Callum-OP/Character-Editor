@@ -19,12 +19,29 @@ Args after `--`:
     --strength  <float 0..1>  how far to move onto the reference (1 = fully)
     --smooth-iters <int>      Laplacian passes over the displacement field
     --shape-keys <preserve|base>
-    --align <bbox|none>       auto match size+center, or assume pre-aligned
+    --align <bbox|none|rigid> auto match size+center; assume pre-aligned; or
+                              rigid ICP fit (size+center+ROTATION, via
+                              iterative closest-point on the reference BVH)
     --landmarks <path>        optional JSON {"ref":[idx...], "src":[idx...]} of
                               matching vertex indices used to guide the warp
                               (thin-plate-spline / similarity fit before
                               projection) so features line up
     --sym-axis <none|x|y|z>   symmetrize the displacement across this axis
+    --strip-bones             if the source has an armature/skeleton, drop it
+                              from the output instead of keeping it (default:
+                              kept - see "Bone preservation" below)
+
+Bone preservation: if the source model has an Armature (skeleton), it is kept
+attached through every RIGID step (initial axis/unit normalization, bbox
+align, rigid ICP align) by moving the armature object by the exact same
+transform as the mesh, so joints stay correctly placed relative to the mesh's
+size/position/orientation. Vertex groups (bone weights) need no special
+handling at all, since Wrap never changes vertex count or order. What is NOT
+adjusted is bone REST positions relative to the final WRAPPED shape itself -
+if the non-rigid conform step reshapes the mesh a lot (e.g. much
+thinner/thicker limbs), a joint may no longer sit perfectly centred in the new
+surface; that would need re-fitting joints to the new shape, which is a
+distinct, heavier operation (closer to the Rigger tool) than this toggle.
 
 Landmarks are VERTEX INDICES into the imported meshes (the same indexing the
 prepare step exposes to the UI), so no fragile coordinate round-tripping.
@@ -54,12 +71,13 @@ def parse_args(args):
     out = {"reference": None, "source": None, "output": None, "view_output": None,
            "strength": 1.0, "smooth_iters": 3, "shape_keys": "preserve", "align": "bbox",
            "landmarks": None, "sym_axis": "none", "keep_internal": True,
-           "dilate": 0,
+           "dilate": 0, "preserve_bones": True,
            "prepare": False, "ref_out": None, "src_out": None}
     i = 0
     while i < len(args):
         a = args[i]
         if a == "--project-all": out["keep_internal"] = False; i += 1
+        elif a == "--strip-bones": out["preserve_bones"] = False; i += 1
         elif a == "--dilate": out["dilate"] = int(args[i + 1]); i += 2
         elif a == "--prepare": out["prepare"] = True; i += 1
         elif a == "--ref-out": out["ref_out"] = args[i + 1]; i += 2
@@ -81,19 +99,88 @@ def parse_args(args):
 AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
 
 
-def umeyama(src, dst):
-    """Best-fit similarity (rotation+uniform scale+translation) mapping src->dst.
-    src, dst: (n,3) numpy arrays. Returns a warp(points)->points function."""
+def umeyama_transform(src, dst, allow_scale=True):
+    """Best-fit similarity (or rigid, if allow_scale=False) transform mapping
+    src -> dst. src, dst: (n,3) numpy arrays of matched correspondences.
+    Returns (R (3x3 rotation), scale (float), t (3,) translation) such that
+    dst ~= scale * (R @ src) + t."""
     src_mean, dst_mean = src.mean(0), dst.mean(0)
     sc, dc = src - src_mean, dst - dst_mean
     cov = (dc.T @ sc) / len(src)
     U, S, Vt = np.linalg.svd(cov)
     d = np.sign(np.linalg.det(U @ Vt))
     R = U @ np.diag([1.0, 1.0, d]) @ Vt
-    var = (sc ** 2).sum() / len(src)
-    scale = float((S * [1.0, 1.0, d]).sum() / var) if var > 1e-12 else 1.0
+    if allow_scale:
+        var = (sc ** 2).sum() / len(src)
+        scale = float((S * [1.0, 1.0, d]).sum() / var) if var > 1e-12 else 1.0
+    else:
+        scale = 1.0
     t = dst_mean - scale * (R @ src_mean)
+    return R, scale, t
+
+
+def umeyama(src, dst):
+    """Best-fit similarity (rotation+uniform scale+translation) mapping src->dst.
+    src, dst: (n,3) numpy arrays. Returns a warp(points)->points function."""
+    R, scale, t = umeyama_transform(src, dst, allow_scale=True)
     return lambda pts: (scale * (R @ pts.T).T) + t
+
+
+def rigid_icp_align(src, bvh, iterations=8, allow_scale=True, notes=None, armature=None):
+    """Refine alignment with Iterative Closest Point: repeatedly match each
+    source vertex to the nearest point on the reference surface (via `bvh`),
+    fit the best rigid (+ uniform scale) transform from those matches, apply
+    it, and re-match. Unlike the bbox align (translate + scale only), this
+    also solves for ROTATION, so a source model that's turned relative to the
+    reference converges onto the same orientation rather than just the same
+    bounding box.
+
+    Robust to partial mismatch: correspondences farther than a distance cutoff
+    are dropped each round (so non-overlapping parts, e.g. different hair or
+    accessories, don't drag the fit), and the loop stops early once the mean
+    correspondence error stops improving."""
+    basis = basis_positions(src)
+    n = len(basis)
+    if n == 0:
+        return
+    lo, hi = bbox(src)
+    size = max((hi - lo)[i] for i in range(3)) or 1.0
+    max_corr_dist = size * 0.5
+
+    src_pts = np.array([[p.x, p.y, p.z] for p in basis])
+    cur = src_pts.copy()
+    R_acc, s_acc, t_acc = np.eye(3), 1.0, np.zeros(3)
+    prev_err = None
+    for _ in range(max(1, iterations)):
+        dst_pts = np.empty_like(cur)
+        keep = np.zeros(n, dtype=bool)
+        for i in range(n):
+            loc, _nrm, _idx, dist = bvh.find_nearest(mathutils.Vector(cur[i]))
+            if loc is not None and dist <= max_corr_dist:
+                dst_pts[i] = (loc.x, loc.y, loc.z)
+                keep[i] = True
+        if keep.sum() < max(8, int(0.1 * n)):
+            if notes is not None:
+                notes.append("rigid alignment stopped early (too few close "
+                              "correspondences) - models may be too dissimilar")
+            break
+        R, s, t = umeyama_transform(cur[keep], dst_pts[keep], allow_scale=allow_scale)
+        cur = (s * (R @ cur.T).T) + t
+        R_acc, s_acc = R @ R_acc, s * s_acc
+        t_acc = (s * (R @ t_acc)) + t
+        err = float(np.sqrt(((cur[keep] - dst_pts[keep]) ** 2).sum(-1)).mean())
+        stalled = prev_err is not None and (prev_err - err) < size * 1e-5
+        prev_err = err
+        if stalled:
+            break
+
+    rows = [[float(s_acc * R_acc[r, c]) for c in range(3)] + [float(t_acc[r])]
+            for r in range(3)] + [[0.0, 0.0, 0.0, 1.0]]
+    transform_rigidly(src, mathutils.Matrix(rows), armature)
+    if notes is not None:
+        notes.append("rigid alignment (ICP) applied - rotation%s fit onto "
+                      "the reference orientation"
+                      % (" + scale" if allow_scale else ""))
 
 
 def tps_warp(src, dst):
@@ -116,12 +203,27 @@ def tps_warp(src, dst):
     return warp
 
 
-def symmetrize_positions(target, basis, axis):
+def symmetrize_positions(target, basis, axis, notes=None):
     """Force the wrapped result to be mirror-symmetric across `axis`.
 
     Vertex correspondence (which vertex mirrors which) is found from the *base*
     mesh; the paired target positions are then averaged with each other's
     mirror, so the output is exactly symmetric even if the base wasn't.
+
+    Hardened against duplicate / near-duplicate vertices in the base mesh
+    (unwelded UV seams, coincident eyeball/socket verts, etc.): a plain
+    nearest-neighbour partner lookup isn't guaranteed one-to-one when several
+    vertices share (or nearly share) a position - two DIFFERENT vertices could
+    both nearest-match the SAME partner, and averaging then stacks them on top
+    of each other. This version:
+      1. only accepts a partner match that is MUTUAL (i's nearest is j AND j's
+         nearest is i); a genuine centre-line vertex mirrors to itself and is
+         snapped onto the plane as before. Anything else is ambiguous and is
+         left completely alone rather than guessed,
+      2. as a safety net, checks the symmetrized output for any vertex that
+         ended up coincident with a vertex it *wasn't* already coincident with
+         pre-symmetry (the actual stacking failure mode) and nudges it apart.
+
     Returns symmetrized target positions."""
     n = len(basis)
     bx = [b[axis] for b in basis]
@@ -130,17 +232,45 @@ def symmetrize_positions(target, basis, axis):
     for i, b in enumerate(basis):
         kd.insert(b, i)
     kd.balance()
-    partner = [0] * n
+    raw_partner = [0] * n
     for i, b in enumerate(basis):
         mb = b.copy()
         mb[axis] = 2.0 * bcenter - mb[axis]
         _co, j, _d = kd.find(mb)
-        partner[i] = j
+        raw_partner[i] = j
+
+    partner = [None] * n  # None = ambiguous, leave untouched
+    ambiguous = 0
+    for i in range(n):
+        j = raw_partner[i]
+        if j == i:
+            partner[i] = i  # genuine centre-line vertex
+        elif raw_partner[j] == i:
+            partner[i] = j  # mutual match - trustworthy
+        else:
+            ambiguous += 1
+    if ambiguous and notes is not None:
+        notes.append("%d vertices had ambiguous mirror partners (likely "
+                      "duplicate/unwelded geometry) - left un-mirrored to "
+                      "avoid stacking them" % ambiguous)
+
     tx = [t[axis] for t in target]
     tcenter = (min(tx) + max(tx)) * 0.5
     out = [t.copy() for t in target]
+    done = [False] * n
     for i in range(n):
+        if done[i]:
+            continue
         j = partner[i]
+        if j is None:
+            done[i] = True
+            continue  # ambiguous - leave as the plain wrap result
+        if j == i:
+            mtj = target[i].copy()
+            mtj[axis] = 2.0 * tcenter - mtj[axis]
+            out[i] = (target[i] + mtj) * 0.5
+            done[i] = True
+            continue
         mtj = target[j].copy()
         mtj[axis] = 2.0 * tcenter - mtj[axis]   # mirror partner across centre
         avg = (target[i] + mtj) * 0.5
@@ -148,24 +278,90 @@ def symmetrize_positions(target, basis, axis):
         mavg = avg.copy()
         mavg[axis] = 2.0 * tcenter - mavg[axis]
         out[j] = mavg
+        done[i] = done[j] = True
+
+    # Safety net: separate any vertex that ended up on top of a DIFFERENT
+    # vertex it wasn't already coincident with pre-symmetry.
+    lo = mathutils.Vector((min(b[k] for b in basis) for k in range(3)))
+    hi = mathutils.Vector((max(b[k] for b in basis) for k in range(3)))
+    size = max((hi - lo)[k] for k in range(3)) or 1.0
+    eps = size * 1e-5
+    okd = KDTree(n)
+    for i, p in enumerate(out):
+        okd.insert(p, i)
+    okd.balance()
+    nstacked = 0
+    for i in range(n):
+        nearest = None
+        for _co, j, dist in okd.find_n(out[i], 2):
+            if j != i:
+                nearest = (j, dist)
+                break
+        if nearest is None:
+            continue
+        j, dist = nearest
+        if dist < eps and j != partner[i] and (basis[i] - basis[j]).length > eps:
+            dirn = out[i] - basis[i]
+            if dirn.length < 1e-9:
+                dirn = mathutils.Vector((0.0, 0.0, 1.0))
+            else:
+                dirn.normalize()
+            out[i] = out[i] + dirn * eps * 2.0
+            nstacked += 1
+    if nstacked and notes is not None:
+        notes.append("separated %d vertices that stacked onto an unrelated "
+                      "vertex during symmetrization" % nstacked)
     return out
 
 
 def import_collect(path):
-    """Import a model and return the mesh objects it added to the scene."""
+    """Import a model and return the MESH objects it added to the scene."""
+    return import_collect_all(path)[0]
+
+
+def import_collect_all(path):
+    """Import a model and return (mesh_objects, other_objects) it added to the
+    scene - "other" covers Armatures (and anything else, e.g. empties) so
+    callers can decide whether to keep or discard them."""
     before = set(bpy.context.scene.objects)
     br.import_model(path)
-    return [o for o in bpy.context.scene.objects
-            if o not in before and o.type == "MESH"]
+    added = [o for o in bpy.context.scene.objects if o not in before]
+    return ([o for o in added if o.type == "MESH"],
+            [o for o in added if o.type != "MESH"])
 
 
-def join_objects(objs, prefer_shape_keys=False):
+def armature_of(obj):
+    """The Armature object deforming `obj`, if any (via modifier or parent)."""
+    for m in obj.modifiers:
+        if m.type == "ARMATURE" and m.object is not None:
+            return m.object
+    if obj.parent is not None and obj.parent.type == "ARMATURE":
+        return obj.parent
+    return None
+
+
+def detach_parent_keep_transform(obj):
+    """Clear a parent relationship without moving the object in world space,
+    so later rigid transforms can be applied to `obj` and its armature
+    independently (as plain world matrices) without parent-inverse math."""
+    if obj.parent is not None:
+        mw = obj.matrix_world.copy()
+        obj.parent = None
+        obj.matrix_world = mw
+
+
+def join_objects(objs, prefer_shape_keys=False, prefer_armature=False):
     if len(objs) == 1:
         return objs[0]
     active = objs[0]
     if prefer_shape_keys:
         for o in objs:
             if o.data.shape_keys:
+                active = o
+                break
+    if prefer_armature and armature_of(active) is None:
+        for o in objs:
+            if armature_of(o) is not None:
                 active = o
                 break
     bpy.ops.object.select_all(action="DESELECT")
@@ -202,8 +398,25 @@ def bake_matrix(obj, M):
     obj.data.update()
 
 
-def apply_transforms(obj):
-    bake_matrix(obj, obj.matrix_world.copy())
+def transform_rigidly(obj, M, armature=None):
+    """Bake M into obj's mesh data (+ shape keys) via bake_matrix, and, if an
+    armature is supplied, apply the SAME rigid transform to the armature
+    object's world matrix.
+
+    Vertex groups (bone weights) never need touching - Wrap never changes
+    vertex count or order, so they stay valid automatically. What breaks
+    bones is any RIGID move of the mesh (unit/axis normalization on import,
+    bbox align, rigid ICP align) happening to the mesh alone: the skeleton
+    would be left behind at its old size/position/orientation, floating
+    outside the resized/rotated mesh. Moving the armature object by the same
+    matrix keeps it locked to the mesh through every such step."""
+    bake_matrix(obj, M)
+    if armature is not None:
+        armature.matrix_world = M @ armature.matrix_world
+
+
+def apply_transforms(obj, armature=None):
+    transform_rigidly(obj, obj.matrix_world.copy(), armature)
 
 
 def bbox(obj):
@@ -213,9 +426,10 @@ def bbox(obj):
     return lo, hi
 
 
-def align_source(src, ref):
+def align_source(src, ref, armature=None):
     """Translate+scale the source so its bounding box matches the reference's
-    (centers coincide, largest dimensions equal). Applies to base + shape keys."""
+    (centers coincide, largest dimensions equal). Applies to base + shape keys
+    (+ armature, if supplied - see transform_rigidly)."""
     s_lo, s_hi = bbox(src)
     r_lo, r_hi = bbox(ref)
     s_center, r_center = (s_lo + s_hi) * 0.5, (r_lo + r_hi) * 0.5
@@ -225,7 +439,7 @@ def align_source(src, ref):
     M = (mathutils.Matrix.Translation(r_center)
          @ mathutils.Matrix.Diagonal((s, s, s, 1.0))
          @ mathutils.Matrix.Translation(-s_center))
-    bake_matrix(src, M)  # transforms basis + all shape keys (keeps blend shapes)
+    transform_rigidly(src, M, armature)  # transforms basis + shape keys + armature
 
 
 def reference_bvh(ref):
@@ -395,23 +609,57 @@ def main():
             sys.exit(1)
 
     br.clear_scene()
-    ref = join_objects(import_collect(cfg["reference"]))
+    ref_meshes, ref_others = import_collect_all(cfg["reference"])
+    ref = join_objects(ref_meshes)
     apply_transforms(ref)
-    src_objs = import_collect(cfg["source"])
-    if not src_objs:
+    # the reference is only ever used for its shape - any rig data that came
+    # with it (e.g. it happened to be a rigged file too) must never leak into
+    # the output, regardless of the source's own bone-preservation setting
+    for o in ref_others:
+        try:
+            bpy.data.objects.remove(o, do_unlink=True)
+        except Exception:
+            pass
+
+    src_meshes, src_others = import_collect_all(cfg["source"])
+    if not src_meshes:
         print("RETOPO_RESULT:" + json.dumps({"ok": False, "error": "no mesh in source"}))
         sys.exit(1)
-    src = join_objects(src_objs, prefer_shape_keys=True)
-    apply_transforms(src)
+    src = join_objects(src_meshes, prefer_shape_keys=True,
+                        prefer_armature=cfg["preserve_bones"])
 
     notes = []
-    if cfg["align"] == "bbox":
-        align_source(src, ref)
+    src_armature = None
+    if cfg["preserve_bones"]:
+        src_armature = armature_of(src)
+        if src_armature is not None:
+            # decouple parent-inverse math so every later rigid transform can
+            # just be applied to both objects' world matrices directly
+            detach_parent_keep_transform(src)
+    else:
+        for o in src_others:
+            try:
+                bpy.data.objects.remove(o, do_unlink=True)
+            except Exception:
+                pass
+    apply_transforms(src, armature=src_armature)
 
     bvh = reference_bvh(ref)
     ref_vert_count = len(ref.data.vertices)
     _rl, _rh = bbox(ref)
     ref_size = max((_rh - _rl)[i] for i in range(3)) or 1.0
+
+    if cfg["align"] == "bbox":
+        align_source(src, ref, armature=src_armature)
+    elif cfg["align"] == "rigid":
+        align_source(src, ref, armature=src_armature)  # coarse bbox init gives ICP a good start
+        rigid_icp_align(src, bvh, iterations=8, allow_scale=True, notes=notes,
+                         armature=src_armature)
+    if src_armature is not None:
+        notes.append("armature '%s' kept and moved rigidly with the source "
+                      "through alignment; bone rest positions are not "
+                      "reshaped by the wrap deformation itself" % src_armature.name)
+
     basis = basis_positions(src)
     strength = max(0.0, min(1.0, cfg["strength"]))
 
@@ -580,7 +828,7 @@ def main():
     final = [warped[i] + d[i] for i in range(len(basis))]
 
     if cfg["sym_axis"] in AXIS_INDEX:
-        final = symmetrize_positions(final, basis, AXIS_INDEX[cfg["sym_axis"]])
+        final = symmetrize_positions(final, basis, AXIS_INDEX[cfg["sym_axis"]], notes=notes)
 
     # accuracy readout over the conformed (outer) surface only
     res_d = []
@@ -665,6 +913,7 @@ def main():
         "strength": strength,
         "landmarks": n_landmarks,
         "sym_axis": cfg["sym_axis"],
+        "bones_preserved": src_armature is not None,
         "notes": notes,
         "output": cfg["output"],
     }))

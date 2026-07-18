@@ -51,7 +51,8 @@ def prepare(reference, source, ref_out, src_out):
 
 def run_wrap(reference, source, output, view_output, strength=1.0,
              smooth_iters=3, shape_keys="preserve", align="bbox",
-             landmarks=None, sym_axis="none", keep_internal=True):
+             landmarks=None, sym_axis="none", keep_internal=True,
+             preserve_bones=True):
     cmd = [
         _blender(), "--background", "--factory-startup", "--python", WRAP_SCRIPT, "--",
         "--reference", reference, "--source", source, "--output", output,
@@ -63,4 +64,6 @@ def run_wrap(reference, source, output, view_output, strength=1.0,
         cmd += ["--landmarks", landmarks]
     if not keep_internal:
         cmd.append("--project-all")
+    if not preserve_bones:
+        cmd.append("--strip-bones")
     return _run(cmd)
